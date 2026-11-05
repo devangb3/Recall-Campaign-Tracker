@@ -1,5 +1,8 @@
 misc/
 venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
 .env
 .env.local
 .env.development.local

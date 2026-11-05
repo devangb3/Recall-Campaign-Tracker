@@ -11,6 +11,9 @@ uses it) and carry a valid check digit. Dates are written MM/DD/YYYY, the
 dealership's US format. The same seed and as-of date always give
 byte-identical files.
 
+Planted cases and safe mess are added by plant.py. Each planted data issue
+is listed in planted_issues.csv, the mess log the tests compare against.
+
 Usage:
     python -m recall_tracker.generate --seed 42 --as-of 2026-11-01 --out data/raw
 """
@@ -27,9 +30,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+from . import plant
 from .vin import VIN_CHARS, with_check_digit
 
-GENERATOR_VERSION = "0.1.0"
+GENERATOR_VERSION = "0.2.0"
 DEFAULT_SEED = 42
 DEFAULT_AS_OF = date(2026, 11, 1)
 DEFAULT_VEHICLES = 500
@@ -37,6 +41,10 @@ DEFAULT_VEHICLES = 500
 AFFECTED_FILE = "affected_vehicles.csv"
 NOTICES_FILE = "notices_sent.csv"
 REPAIRS_FILE = "repairs_done.csv"
+MESS_LOG_FILE = "planted_issues.csv"
+MESS_LOG_COLUMNS = ["file", "row_num", "column", "issue_code", "action",
+                    "reason"]
+MIN_BACKGROUND = 10
 
 COLUMNS = {
     AFFECTED_FILE: ["vin", "campaign_id"],
@@ -79,6 +87,8 @@ class Row:
     file: str
     values: dict
     tag: str = "background"
+    issue: dict | None = None   # planted data issue, if any
+    link: tuple | None = None   # ties a duplicate or date conflict pair
 
 
 def fmt_us(d: date) -> str:
@@ -150,23 +160,48 @@ def render_csv(columns: list[str], rows: list[Row]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def render_dicts(columns: list[str], rows: list[dict]) -> bytes:
+    buf = io.StringIO(newline="")
+    writer = csv.DictWriter(buf, columns, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue().encode("utf-8")
+
+
 def generate(seed: int = DEFAULT_SEED, as_of: date = DEFAULT_AS_OF,
              n_vehicles: int = DEFAULT_VEHICLES) -> dict[str, list[Row]]:
-    """Build all rows, grouped by file, in final file order."""
+    """Build all rows, grouped by file, in final file order.
+
+    n_vehicles counts every VIN in the affected file: planted vehicles
+    first, then background vehicles to make up the total.
+    """
+    if as_of < plant.DAY61_REPAIR + timedelta(days=60):
+        raise ValueError("as-of date must be on or after 2026-05-01")
     rng = random.Random(seed)
     vins = VinFactory(rng)
-    rows = background_rows(rng, vins, n_vehicles, as_of)
+    planted = (plant.business_case_rows(rng, vins, as_of)
+               + plant.data_issue_rows(rng, vins, as_of))
+    planted_affected = {r.values["vin"] for r in planted
+                        if r.file == AFFECTED_FILE}
+    n_background = max(n_vehicles - len(planted_affected), MIN_BACKGROUND)
+    background = background_rows(rng, vins, n_background, as_of)
+    plant.apply_safe_mess(rng, background)
+
     by_file: dict[str, list[Row]] = {f: [] for f in COLUMNS}
-    for row in rows:
+    for row in background + planted:
         by_file[row.file].append(row)
     for name in COLUMNS:
-        rng.shuffle(by_file[name])
+        by_file[name] = plant.order_rows(rng, by_file[name])
+        plant.attach_linked_issues(name, by_file[name])
     return by_file
 
 
 def write_outputs(by_file: dict[str, list[Row]], out_dir: Path, seed: int,
                   as_of: date) -> dict:
-    """Write the three CSVs and manifest.json. Return the manifest."""
+    """Write the three CSVs, planted_issues.csv and manifest.json.
+
+    Return the manifest.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     files = {}
     for name, columns in COLUMNS.items():
@@ -174,6 +209,11 @@ def write_outputs(by_file: dict[str, list[Row]], out_dir: Path, seed: int,
         (out_dir / name).write_bytes(data)
         files[name] = {"rows": len(by_file[name]),
                        "sha256": hashlib.sha256(data).hexdigest()}
+    log = plant.mess_log(by_file)
+    log_bytes = render_dicts(MESS_LOG_COLUMNS, log)
+    (out_dir / MESS_LOG_FILE).write_bytes(log_bytes)
+    files[MESS_LOG_FILE] = {"rows": len(log),
+                            "sha256": hashlib.sha256(log_bytes).hexdigest()}
     manifest = {
         "generator_version": GENERATOR_VERSION,
         "seed": seed,
@@ -195,8 +235,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     by_file = generate(args.seed, args.as_of, args.vehicles)
     manifest = write_outputs(by_file, args.out, args.seed, args.as_of)
-    for name, info in manifest["files"].items():
+    for name in COLUMNS:
+        info = manifest["files"][name]
         print(f"{name}: {info['rows']} rows")
+    print(f"{MESS_LOG_FILE}: {manifest['files'][MESS_LOG_FILE]['rows']} planted data issues")
     print(f"Wrote files to {args.out}/")
 
 

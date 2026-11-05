@@ -5,3 +5,8 @@ venv/
 .env.development.local
 .env.test.local
 .env.production.local
+# Generated data (rebuild with python -m recall_tracker.generate)
+data/
+*.db
+__pycache__/
+.pytest_cache/

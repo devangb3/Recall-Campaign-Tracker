@@ -324,9 +324,15 @@ def test_screen_payload_uses_the_contract_keys_and_drops_excluded_ones():
 def test_a_finding_cannot_carry_a_rank_or_an_owner():
     rows = facts()
     flag = finding(rows, FindingKind.NOTIFICATION, "No notice on file.")
-    assert "priority" not in Finding.__slots__
+    assert {"priority", "rank", "owner"}.isdisjoint(Finding.__slots__)
     with pytest.raises(AttributeError):
+        flag.reason = "changed"
+    # Python 3.12's frozen slotted dataclass calls super() for an unknown
+    # name and raises TypeError. 3.13 raises AttributeError. The name is
+    # not stored on either version.
+    with pytest.raises((AttributeError, TypeError)):
         flag.owner = "someone"
+    assert not hasattr(flag, "owner")
 
 
 def test_payload_rejects_a_finding_whose_facts_differ():

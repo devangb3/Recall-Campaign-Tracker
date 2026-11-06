@@ -483,6 +483,29 @@ def write(con: sqlite3.Connection, result: IngestResult,
     return ingest_id
 
 
+def prepare(raw_dir: Path, as_of: date | None = None) -> IngestResult:
+    """Read and validate every file without opening or changing a database."""
+    result = validate(read_all(Path(raw_dir)), as_of or date.today())
+    result.check_row_balance()
+    return result
+
+
+def load_prepared(con: sqlite3.Connection, result: IngestResult,
+                  started_at: str | None = None) -> int:
+    """Load validated rows inside the caller's transaction.
+
+    The tool pipeline uses this to save an ingest and its check results in
+    one transaction. The CSV parser, safe fixes, issue codes and row-balance
+    checks are the same as the standalone ingest command.
+    """
+    if not con.in_transaction:
+        raise ValueError("loading prepared rows requires a transaction")
+    result.check_row_balance()
+    ingest_id = write(con, result, started_at or _now())
+    _check_db_balance(con, ingest_id, result)
+    return ingest_id
+
+
 def load(raw_dir: Path, db_path: Path, as_of: date | None = None) -> int:
     """Read, check and load the three files. Return the new ingest_id.
 
@@ -492,14 +515,11 @@ def load(raw_dir: Path, db_path: Path, as_of: date | None = None) -> int:
     """
     as_of = as_of or date.today()
     started_at = _now()
-    files = read_all(Path(raw_dir))
-    result = validate(files, as_of)
-    result.check_row_balance()
+    result = prepare(raw_dir, as_of)
     con = sqlite3.connect(db_path, isolation_level=None)
     try:
         con.execute("BEGIN IMMEDIATE")
-        ingest_id = write(con, result, started_at)
-        _check_db_balance(con, ingest_id, result)
+        ingest_id = load_prepared(con, result, started_at)
         con.execute("COMMIT")
         return ingest_id
     except BaseException:

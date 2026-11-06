@@ -7,8 +7,8 @@ import pytest
 
 from recall_tracker.contract import (
     DEFAULT_DAY_LIMIT, AffectedVehicle, CheckHistoryRow, ContractError,
-    Decision, DecisionStatus, Facts, Finding, FindingKind, NoticeSent,
-    RepairDone, ReportPayload, append_decision, build_report,
+    DataIssue, Decision, DecisionStatus, Facts, Finding, FindingKind,
+    NoticeSent, RepairDone, ReportPayload, append_decision, build_report,
     current_decision, decisions_for, history_row, inclusive_day_count,
     is_on_time, notice_date_used, repair_date_used, repair_outside_limit,
     to_dict)
@@ -301,8 +301,8 @@ def test_screen_payload_uses_the_contract_keys_and_drops_excluded_ones():
     dumped = to_dict(payload)
     json.dumps(dumped)
     assert list(dumped) == [
-        "check_date", "day_limit", "findings", "data_quality", "decisions",
-        "history", "vehicles"]
+        "check_date", "day_limit", "findings", "data_quality", "data_issues",
+        "decisions", "history", "vehicles"]
     assert list(dumped["findings"][0]) == [
         "vin", "campaign_id", "kind", "reason", "check_date", "facts"]
     assert dumped["findings"][0]["kind"] == "repair"
@@ -319,6 +319,40 @@ def test_screen_payload_uses_the_contract_keys_and_drops_excluded_ones():
     assert dumped["vehicles"][0]["decision"]["note"] is None
     assert dumped["history"][0]["kind"] == "repair"
     assert _keys(dumped).isdisjoint(EXCLUDED)
+
+
+def test_a_quarantined_row_is_a_data_issue_without_a_finding():
+    issue = DataIssue(
+        "notices_sent.csv", 4, "BAD_VIN", "quarantined",
+        "VIN XXX is not 17 characters.", "XXX,RC-2026-001,01/01/2026")
+    payload = build_report(CHECK, (), (), data_issues=(issue,))
+    assert payload.findings == ()
+    assert payload.data_quality == ()
+    assert payload.data_issues == (issue,)
+    dumped = to_dict(payload)["data_issues"][0]
+    assert dumped["vin"] is None
+    assert dumped["campaign_id"] is None
+    assert dumped["raw_row"] == "XXX,RC-2026-001,01/01/2026"
+
+
+def test_a_bad_notice_date_is_a_data_issue_and_not_a_missing_notice():
+    rows = facts()
+    issue = DataIssue(
+        "notices_sent.csv", 5, "BAD_DATE", "quarantined",
+        "Notice date 02/30/2026 is not a real date.",
+        f"{VIN},{CID},02/30/2026", VIN, CID)
+    payload = build_report(CHECK, (rows,), (), data_issues=(issue,))
+    view = payload.vehicles[0]
+    assert payload.findings == ()
+    assert payload.data_issues == (issue,)
+    assert view.in_notices is True
+    assert view.notice_date_used is None
+    assert view.inclusive_days is None
+    with pytest.raises(ContractError, match="data issue"):
+        build_report(
+            CHECK, (rows,),
+            (finding(rows, FindingKind.NOTIFICATION, "No notice on file."),),
+            data_issues=(issue,))
 
 
 def test_a_finding_cannot_carry_a_rank_or_an_owner():

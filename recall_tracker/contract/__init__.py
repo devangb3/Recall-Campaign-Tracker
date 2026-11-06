@@ -31,11 +31,15 @@ Facts use only these columns:
 * notices sent: vin, campaign_id, notice_date
 * repairs done: vin, campaign_id, repair_date
 
+A notice row with a bad date is a data-issue record. The pair was in the
+notices file, so it is not a notification finding.
+
 Current owner, central-body status, returned mail, and resale are not part
 of this contract. This package does not scan the CSVs and does not invent
 findings. It rejects a finding that contradicts the records above.
 """
 
+from .data_issue import DataIssue
 from .days import (
     DEFAULT_DAY_LIMIT, inclusive_day_count, is_on_time, notice_date_used,
     repair_date_used, repair_outside_limit)
@@ -46,8 +50,8 @@ from .finding import Finding, FindingKind
 from .history import CheckHistoryRow, history_row
 from .report import ReportPayload, VehicleView, build_report
 from .serialize import (
-    AffectedDict, DecisionDict, FactsDict, FindingDict, HistoryDict,
-    NoticeDict, RepairDict, ReportDict, VehicleDict, to_dict)
+    AffectedDict, DataIssueDict, DecisionDict, FactsDict, FindingDict,
+    HistoryDict, NoticeDict, RepairDict, ReportDict, VehicleDict, to_dict)
 from .validate import ContractError
 
 __all__ = [
@@ -56,6 +60,8 @@ __all__ = [
     "AffectedVehicle",
     "CheckHistoryRow",
     "ContractError",
+    "DataIssue",
+    "DataIssueDict",
     "Decision",
     "DecisionDict",
     "DecisionStatus",

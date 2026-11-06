@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import TypedDict
 
+from .data_issue import DataIssue
 from .decision import Decision
 from .facts import Facts
 from .finding import Finding
@@ -61,6 +62,17 @@ class HistoryDict(TypedDict):
     day_limit: int
 
 
+class DataIssueDict(TypedDict):
+    file: str
+    src_row: int
+    issue_code: str
+    action: str
+    reason: str
+    raw_row: str
+    vin: str | None
+    campaign_id: str | None
+
+
 class VehicleDict(TypedDict):
     vin: str
     campaign_id: str
@@ -80,6 +92,7 @@ class ReportDict(TypedDict):
     day_limit: int
     findings: list[FindingDict]
     data_quality: list[FindingDict]
+    data_issues: list[DataIssueDict]
     decisions: list[DecisionDict]
     history: list[HistoryDict]
     vehicles: list[VehicleDict]
@@ -125,6 +138,19 @@ def _decision_dict(decision: Decision) -> DecisionDict:
     }
 
 
+def _data_issue_dict(issue: DataIssue) -> DataIssueDict:
+    return {
+        "file": issue.file,
+        "src_row": issue.src_row,
+        "issue_code": issue.issue_code,
+        "action": issue.action,
+        "reason": issue.reason,
+        "raw_row": issue.raw_row,
+        "vin": issue.vin,
+        "campaign_id": issue.campaign_id,
+    }
+
+
 def to_dict(payload: ReportPayload) -> ReportDict:
     """The JSON-ready payload. Dates are ISO strings. Null means absent."""
     if type(payload) is not ReportPayload:
@@ -135,6 +161,8 @@ def to_dict(payload: ReportPayload) -> ReportDict:
         "findings": [_finding_dict(finding) for finding in payload.findings],
         "data_quality": [_finding_dict(finding)
                          for finding in payload.data_quality],
+        "data_issues": [_data_issue_dict(issue)
+                        for issue in payload.data_issues],
         "decisions": [_decision_dict(decision)
                       for decision in payload.decisions],
         "history": [{

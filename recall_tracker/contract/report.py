@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
+from .data_issue import DataIssue, quarantined_notice
 from .days import (
     DEFAULT_DAY_LIMIT, inclusive_day_count, is_on_time, notice_date_used,
     repair_date_used, repair_outside_limit)
@@ -77,7 +78,8 @@ def _split_findings(
 
 def _vehicle_view(facts: Facts, check_date: date, day_limit: int,
                   quality: Sequence[Finding],
-                  decisions: Sequence[Decision]) -> VehicleView:
+                  decisions: Sequence[Decision],
+                  data_issues: Sequence[DataIssue]) -> VehicleView:
     notice = notice_date_used(facts)
     repair = repair_date_used(facts)
     if notice is None:
@@ -92,10 +94,12 @@ def _vehicle_view(facts: Facts, check_date: date, day_limit: int,
     reasons = tuple(
         finding.reason for finding in quality
         if finding.vin == facts.vin and finding.campaign_id == facts.campaign_id)
+    in_file = notice is not None or quarantined_notice(
+        data_issues, facts.vin, facts.campaign_id)
     return VehicleView(
         vin=facts.vin,
         campaign_id=facts.campaign_id,
-        in_notices=notice is not None,
+        in_notices=in_file,
         notice_date_used=notice,
         repair_date_used=repair,
         inclusive_days=inclusive,
@@ -115,7 +119,8 @@ class ReportPayload:
     emitted. ``data_quality`` is the other list. ``decisions`` keeps every
     decision, including ones for a vehicle that is not in this upload.
     ``history`` keeps every check row. ``vehicles`` is one view per pair
-    whose facts were supplied.
+    whose facts were supplied. ``data_issues`` keeps rows that cannot be
+    findings, including a quarantined row with no usable vin.
     """
 
     check_date: date
@@ -125,6 +130,7 @@ class ReportPayload:
     decisions: tuple[Decision, ...]
     history: tuple[CheckHistoryRow, ...]
     vehicles: tuple[VehicleView, ...]
+    data_issues: tuple[DataIssue, ...] = ()
 
     def __post_init__(self) -> None:
         require_date(self.check_date, "check date")
@@ -134,18 +140,21 @@ class ReportPayload:
         decisions = as_tuple(self.decisions, Decision, "decisions")
         history = as_tuple(self.history, CheckHistoryRow, "history")
         vehicles = as_tuple(self.vehicles, VehicleView, "vehicles")
+        data_issues = as_tuple(self.data_issues, DataIssue, "data_issues")
         object.__setattr__(self, "findings", findings)
         object.__setattr__(self, "data_quality", quality)
         object.__setattr__(self, "decisions", decisions)
         object.__setattr__(self, "history", history)
         object.__setattr__(self, "vehicles", vehicles)
+        object.__setattr__(self, "data_issues", data_issues)
         self._reject_duplicates("findings", findings)
         self._reject_duplicates("data_quality", quality)
+        self._reject_duplicates("data_issues", data_issues)
         self._check_kinds(findings, quality)
         views = self._views_by_pair(vehicles)
         self._check_findings(findings, views)
         self._check_quality(quality, views)
-        self._check_views(vehicles, quality, decisions)
+        self._check_views(vehicles, quality, decisions, data_issues)
 
     def _reject_duplicates(self, field: str, rows: tuple[object, ...]) -> None:
         if len(rows) != len(set(rows)):
@@ -193,6 +202,11 @@ class ReportPayload:
                     raise ContractError(
                         "a notification finding is an affected vehicle "
                         "with no notice on file")
+                if quarantined_notice(
+                        self.data_issues, finding.vin, finding.campaign_id):
+                    raise ContractError(
+                        "a notice row that failed validation is a data issue, "
+                        "not a notification finding")
             else:
                 if not repair_outside_limit(
                         finding.facts, self.check_date, self.day_limit):
@@ -218,10 +232,12 @@ class ReportPayload:
 
     def _check_views(self, vehicles: tuple[VehicleView, ...],
                      quality: tuple[Finding, ...],
-                     decisions: tuple[Decision, ...]) -> None:
+                     decisions: tuple[Decision, ...],
+                     data_issues: tuple[DataIssue, ...]) -> None:
         for view in vehicles:
             expected = _vehicle_view(
-                view.facts, self.check_date, self.day_limit, quality, decisions)
+                view.facts, self.check_date, self.day_limit, quality,
+                decisions, data_issues)
             if view != expected:
                 raise ContractError(
                     f"vehicle {view.vin} {view.campaign_id} "
@@ -232,6 +248,7 @@ def build_report(check_date: date, vehicles: Sequence[Facts],
                  findings: Sequence[Finding], *,
                  decisions: Sequence[Decision] = (),
                  history: Sequence[CheckHistoryRow] = (),
+                 data_issues: Sequence[DataIssue] = (),
                  day_limit: int = DEFAULT_DAY_LIMIT) -> ReportPayload:
     """Assemble the payload the screens read.
 
@@ -245,9 +262,11 @@ def build_report(check_date: date, vehicles: Sequence[Facts],
     finding_rows = as_tuple(findings, Finding, "findings")
     decision_rows = as_tuple(decisions, Decision, "decisions")
     history_rows = as_tuple(history, CheckHistoryRow, "history")
+    issue_rows = as_tuple(data_issues, DataIssue, "data_issues")
     flagged, quality = _split_findings(finding_rows)
     views = tuple(
-        _vehicle_view(facts, check_date, day_limit, quality, decision_rows)
+        _vehicle_view(facts, check_date, day_limit, quality, decision_rows,
+                      issue_rows)
         for facts in vehicle_facts)
     return ReportPayload(
         check_date=check_date,
@@ -257,4 +276,5 @@ def build_report(check_date: date, vehicles: Sequence[Facts],
         decisions=decision_rows,
         history=history_rows,
         vehicles=views,
+        data_issues=issue_rows,
     )

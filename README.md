@@ -1,5 +1,8 @@
 # Recall-Campaign-Tracker
 
+See the [architecture overview](docs/architecture/overview.md) for the data
+flow, module responsibilities, checks, storage, and CLI/API behavior.
+
 ## Part 1: synthetic data
 
 Generate the three dealership CSVs (seed 42, as-of 2026-11-01, about 500 vehicles):

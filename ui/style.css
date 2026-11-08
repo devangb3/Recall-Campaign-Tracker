@@ -117,4 +117,67 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 .filter input, .filter select { font: inherit; padding: 6px 8px; border: 1px solid #c9d1de; border-radius: 8px; background: #fff; color: inherit; }
 .filter-count { margin: 6px 0 10px; }
 button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
-@media print { .views, .filters { display: none; } }
+.actions { display: flex; gap: 10px; }
+#export-pdf { background: #fff; color: var(--accent); }
+#print-report { display: none; }
+
+/* Export dialog */
+#export-dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; max-width: 520px; width: calc(100% - 32px); box-shadow: 0 20px 50px rgba(23,32,51,.25); color: var(--ink); }
+#export-dialog::backdrop { background: rgba(23,32,51,.45); }
+#export-dialog h2 { margin: 0 0 6px; font-size: 20px; }
+.export-option { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-weight: 400; }
+.export-option:hover { background: #f3f7fc; }
+.export-option input { margin-top: 4px; width: 17px; height: 17px; accent-color: var(--accent); }
+.export-option strong { display: block; }
+.export-option .hint { display: block; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* PDF export: only the print-only copy is printed. */
+@page {
+  size: A4 landscape; margin: 14mm 12mm 16mm;
+  @bottom-left { content: "Infinachi Auto Repairs \00b7  Recall campaign report"; font: 9px system-ui, sans-serif; color: #5f6b7d; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 9px system-ui, sans-serif; color: #5f6b7d; }
+}
+@media print {
+  body { background: #fff; font-size: 11px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .topbar, #export-dialog, main > :not(#print-report) { display: none !important; }
+  main { max-width: none; padding: 0; }
+  #print-report { display: block; }
+
+  .print-cover { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding: 18px 22px;
+    background: linear-gradient(135deg, #1b3a6b, #2b6cb0); color: #fff; border-radius: 10px; }
+  .print-dealer { margin: 0; text-transform: uppercase; letter-spacing: .12em; font-size: 11px; opacity: .85; }
+  #print-report h1 { margin: 4px 0 0; font-size: 28px; letter-spacing: -.01em; }
+  .print-meta { display: flex; gap: 22px; margin: 0; }
+  .print-meta dt { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; opacity: .8; }
+  .print-meta dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
+
+  .print-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 12px; }
+  .print-kpi { padding: 12px 14px; border: 1px solid var(--line); border-top: 5px solid #8896ab; border-radius: 8px; background: #fff; break-inside: avoid; }
+  .print-kpi-n { display: block; font-size: 38px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+  .print-kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .print-kpi.total { border-top-color: #1b3a6b; } .print-kpi.total .print-kpi-n { color: #1b3a6b; }
+  .print-kpi.notification { border-top-color: var(--notif); } .print-kpi.notification .print-kpi-n { color: var(--notif); }
+  .print-kpi.repair { border-top-color: #c98a0a; } .print-kpi.repair .print-kpi-n { color: var(--repair); }
+  .print-kpi.data { border-top-color: var(--data); } .print-kpi.data .print-kpi-n { color: var(--data); }
+  .print-rule { margin: 8px 0 0; color: var(--muted); font-size: 10.5px; }
+
+  .print-section { margin-top: 20px; }
+  .print-section h2 { margin: 0 0 6px; padding: 0 0 4px 10px; font-size: 16px; border-left: 5px solid var(--accent); break-after: avoid; }
+  .print-section.tone-data h2 { border-left-color: var(--data); color: var(--data); }
+  .print-section.tone-findings h2 { border-left-color: #c98a0a; }
+  .print-section.tone-vehicles h2 { border-left-color: #1b3a6b; }
+  .print-section.tone-history h2 { border-left-color: #8896ab; }
+  .print-section h3 { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); break-after: avoid; }
+  .print-note { margin: 0 0 6px; color: var(--muted); font-size: 10.5px; }
+  .print-omitted { margin-top: 20px; padding-top: 8px; border-top: 1px dashed #c9d1de; color: var(--muted); font-size: 10.5px; }
+
+  .table-wrap { max-height: none; overflow: visible; box-shadow: none; border-radius: 6px; }
+  th { position: static; background: #eef2f8; color: #33415a; }
+  thead { display: table-header-group; }
+  tbody tr:nth-child(even) td { background: #f7f9fc; }
+  tr { break-inside: avoid; }
+  td, th { padding: 3px 6px; line-height: 1.3; }
+  .kind, .status { padding: 0 6px; }
+  .empty { padding: 8px 10px; }
+}

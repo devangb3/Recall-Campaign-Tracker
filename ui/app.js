@@ -108,6 +108,7 @@ function clearMessage() {
 // A failed load shows only the error. No findings, empty or old, stay on screen.
 function showError(text) {
   current = null;
+  $("export-pdf").disabled = true;
   $("report").hidden = true;
   $("detail").hidden = true;
   $("history").hidden = true;
@@ -116,6 +117,7 @@ function showError(text) {
 
 function showNoCheckYet() {
   current = null;
+  $("export-pdf").disabled = true;
   $("report").hidden = true;
   $("detail").hidden = true;
   $("history").hidden = true;
@@ -133,6 +135,7 @@ function render(result) {
   const report = result.report;
   clearMessage();
   current = result;
+  $("export-pdf").disabled = false;
   $("day-limit").value = report.day_limit;
   $("summary").textContent =
     `Data loaded from files ${loadedText(result.loaded_at)} · check date ${report.check_date} · ` +
@@ -348,6 +351,224 @@ function renderHistory(report) {
           statusBadge(d.status), d.note]));
   }
   showResults();
+}
+
+// ---- PDF export (REC-28) --------------------------------------------------
+// "Export PDF" asks what to include, fills a print-only copy of the loaded
+// report and opens the browser's print dialog; choose "Save as PDF" there.
+// Every part uses the same data as the screen, with data problems kept apart.
+// It reads only what is already loaded (plus the saved-runs list) and
+// contacts no one.
+
+function newestFirst(rows, field) {
+  return rows.slice().reverse()
+    .sort((a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0));
+}
+
+// Every vehicle with a finding, a data-quality flag or a decision.
+function detailVehicles(report) {
+  const flagged = new Set();
+  report.findings.concat(report.data_quality)
+    .forEach((f) => flagged.add(`${f.vin}\u0000${f.campaign_id}`));
+  return report.vehicles.filter((v) => flagged.has(`${v.vin}\u0000${v.campaign_id}`) ||
+    v.decision !== null || v.data_quality_reasons.length > 0);
+}
+
+// What the person can switch on or off. "checks" is the long one, so it
+// starts off. The summary at the top is always included.
+const exportChoice = { findings: true, data: true, vehicles: true, runs: true, checks: false, decisions: true };
+
+function exportParts(report) {
+  return [
+    ["findings", "Findings", `${report.findings.length} notification and repair findings`],
+    ["data", "Missing and bad data",
+      `${report.data_issues.length} data issues and ${report.data_quality.length} vehicle data-quality flags, kept apart`],
+    ["vehicles", "Vehicle detail", `${detailVehicles(report).length} vehicles with a finding, a flag or a decision`],
+    ["runs", "Saved runs", "each check run with its date and day limit"],
+    ["checks", "Every saved check", `${report.history.length} rows from all saved runs. This can run to many pages`],
+    ["decisions", "Coordinator decisions", `${report.decisions.length} decisions, newest first`],
+  ];
+}
+
+function openExportDialog() {
+  if (current === null) {
+    showMessage("There is no report to export. Run a check first.", true);
+    return;
+  }
+  const box = $("export-options");
+  box.replaceChildren();
+  exportParts(current.report).forEach(([key, label, note]) => {
+    const row = el("label", null, "export-option");
+    const input = el("input");
+    input.type = "checkbox";
+    input.name = key;
+    input.checked = exportChoice[key];
+    input.addEventListener("change", () => { exportChoice[key] = input.checked; });
+    const text = el("span");
+    text.appendChild(el("strong", label));
+    text.appendChild(el("span", note, "hint"));
+    row.appendChild(input);
+    row.appendChild(text);
+    box.appendChild(row);
+  });
+  $("export-dialog").showModal();
+}
+
+function printSection(root, title, tone, note) {
+  const section = el("section", null, `print-section ${tone || ""}`);
+  section.appendChild(el("h2", title));
+  if (note) section.appendChild(el("p", note, "print-note"));
+  root.appendChild(section);
+  return section;
+}
+
+function printTable(section, columns, rows, cell, emptyText) {
+  section.appendChild(rows.length === 0 ? empty(emptyText) : table(columns, rows, cell));
+}
+
+function kpi(value, label, tone) {
+  const card = el("div", null, `print-kpi ${tone}`);
+  card.appendChild(el("span", String(value), "print-kpi-n"));
+  card.appendChild(el("span", label, "print-kpi-l"));
+  return card;
+}
+
+function buildPrintReport(result, runs, choice) {
+  const report = result.report;
+  const root = $("print-report");
+  root.replaceChildren();
+
+  // Cover band: who, what, which check.
+  const cover = el("div", null, "print-cover");
+  const title = el("div");
+  title.appendChild(el("p", DEALERSHIP_NAME, "print-dealer"));
+  title.appendChild(el("h1", "Recall campaign report"));
+  cover.appendChild(title);
+  const meta = el("dl", null, "print-meta");
+  [["Check date", report.check_date], ["Run", `#${result.run_id}`],
+   ["Repair day limit", `${report.day_limit} days`],
+   ["Data loaded", loadedText(result.loaded_at).replace(/^on /, "")]].forEach(([k, v]) => {
+    const item = el("div");
+    item.appendChild(el("dt", k));
+    item.appendChild(el("dd", v));
+    meta.appendChild(item);
+  });
+  cover.appendChild(meta);
+  root.appendChild(cover);
+
+  // The numbers that matter, big. Notification and repair carry equal weight.
+  const counts = { notification: 0, repair: 0 };
+  report.findings.forEach((f) => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
+  const checked = report.vehicles.filter((v) => v.facts.affected.length > 0).length;
+  const kpis = el("div", null, "print-kpis");
+  kpis.appendChild(kpi(checked, "Vehicles checked (per campaign)", "total"));
+  kpis.appendChild(kpi(counts.notification, "Notification findings", "notification"));
+  kpis.appendChild(kpi(counts.repair, "Repair findings", "repair"));
+  kpis.appendChild(kpi(report.data_issues.length, "Data issues", "data"));
+  kpis.appendChild(kpi(report.data_quality.length, "Data-quality flags", "data"));
+  root.appendChild(kpis);
+  root.appendChild(el("p",
+    `Repair window: ${report.day_limit} days, counting both the notice day and the repair day. ` +
+    "Data issues and flags are data problems, never findings.", "print-rule"));
+
+  if (choice.findings) {
+    const sec = printSection(root, `Findings (${report.findings.length})`, "tone-findings");
+    printTable(sec, ["VIN", "Campaign", "Kind", "Reason"], report.findings,
+      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"),
+        el("span", f.kind, `kind kind-${f.kind}`), f.reason], "No findings in this check.");
+  }
+
+  if (choice.data) {
+    const sec = printSection(root, "Missing and bad data", "tone-data",
+      "These are data problems, not findings. A row listed here is never treated as \"not notified\".");
+    sec.appendChild(el("h3", `Data issues (${report.data_issues.length})`));
+    printTable(sec, ["File and row", "Code and action", "VIN", "Campaign", "Reason"], report.data_issues,
+      (d) => [el("span", `${d.file} · row ${d.src_row}`, "nowrap"), codeCell(d),
+        d.vin === null ? "not readable" : el("span", d.vin, "mono"),
+        d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"), d.reason],
+      "No data issues.");
+    sec.appendChild(el("h3", `Vehicle data-quality flags (${report.data_quality.length})`));
+    printTable(sec, ["VIN", "Campaign", "Reason"], report.data_quality,
+      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"), f.reason],
+      "No vehicle data-quality flags.");
+  }
+
+  if (choice.vehicles) {
+    const detail = detailVehicles(report);
+    const sec = printSection(root, `Vehicle detail (${detail.length})`, "tone-vehicles",
+      "Every vehicle with a finding, a data-quality flag or a coordinator decision. " +
+      "With no repair on file, days are counted from the notice to the check date.");
+    printTable(sec, ["VIN", "Campaign", "In notices", "Notice used", "Repair used", "Days", "Limit",
+      "Result", "Current decision", "Data problems"], detail,
+      (v) => [el("span", v.vin, "mono"), el("span", v.campaign_id, "nowrap"), v.in_notices ? "Yes" : "No",
+        v.notice_date_used, v.repair_date_used,
+        v.inclusive_days === null ? null : String(v.inclusive_days), v.day_limit, repairResult(v),
+        v.decision === null ? "—" : statusBadge(v.decision.status),
+        v.data_quality_reasons.length === 0 ? "—" : v.data_quality_reasons.join(" ")],
+      "No vehicles have findings, flags or decisions.");
+  }
+
+  if (choice.runs) {
+    const sec = printSection(root, "Saved runs", "tone-history",
+      "Every check that was run. A later upload never removes earlier rows.");
+    if (runs === null) sec.appendChild(empty("The saved runs could not be loaded."));
+    else printTable(sec, ["Run", "Check date", "Repair day limit", "Data load (ingest)"], runs.slice().reverse(),
+      (r) => [r.run_id, r.check_date, r.day_limit, r.ingest_id], "No saved runs.");
+  }
+
+  const currentBy = currentDecisions(report.decisions);
+  if (choice.checks) {
+    const sec = printSection(root, `Every saved check (${report.history.length})`, "tone-history",
+      "Newest first. Notification and repair entries are not ranked.");
+    printTable(sec, ["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"],
+      newestFirst(report.history, "check_date"),
+      (h) => {
+        const d = currentBy.get(`${h.vin}\u0000${h.campaign_id}`);
+        return [el("span", h.check_date, "nowrap"), el("span", h.vin, "mono"), el("span", h.campaign_id, "nowrap"),
+          kindBadge(h.kind), h.reason, h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
+      }, "No checks have been saved yet.");
+  }
+
+  if (choice.decisions) {
+    const sec = printSection(root, `Coordinator decisions (${report.decisions.length})`, "tone-history",
+      "Newest first. The latest decision for a vehicle is its current decision; earlier ones stay listed.");
+    printTable(sec, ["Decided on", "VIN", "Campaign", "Status", "Note"],
+      newestFirst(report.decisions, "decided_on"),
+      (d) => [el("span", d.decided_on, "nowrap"), el("span", d.vin, "mono"),
+        el("span", d.campaign_id, "nowrap"), statusBadge(d.status), d.note],
+      "No decisions have been recorded yet.");
+  }
+
+  // Say what this PDF leaves out, so a partial export is not mistaken for the whole report.
+  const left = exportParts(report).filter(([key]) => !choice[key]).map(([, label]) => label);
+  if (left.length > 0) {
+    root.appendChild(el("p", `Not included in this PDF: ${left.join(", ")}.`, "print-omitted"));
+  }
+}
+
+async function exportPdf() {
+  if (current === null) {
+    showMessage("There is no report to export. Run a check first.", true);
+    return;
+  }
+  $("export-dialog").close();
+  const button = $("export-pdf");
+  button.disabled = true;
+  try {
+    let runs = null;
+    if (exportChoice.runs) {
+      const saved = await api("GET", "/api/runs");
+      runs = saved.status === 200 ? saved.data.runs : null;
+    }
+    buildPrintReport(current, runs, Object.assign({}, exportChoice));
+    // The browser uses the page title as the suggested file name.
+    const title = document.title;
+    document.title = `Recall report ${current.report.check_date} run ${current.run_id}`;
+    window.addEventListener("afterprint", () => { document.title = title; }, { once: true });
+    window.print();
+  } finally {
+    button.disabled = current === null;
+  }
 }
 
 function route() {
@@ -585,6 +806,9 @@ async function load() {
   else showError(data.error || "The report could not be loaded.");
 }
 
+$("export-pdf").addEventListener("click", openExportDialog);
+$("export-form").addEventListener("submit", (event) => { event.preventDefault(); exportPdf(); });
+$("export-cancel").addEventListener("click", () => $("export-dialog").close());
 $("run-check").addEventListener("click", () => handle(api("POST", "/api/checks", {})));
 
 $("limit-form").addEventListener("submit", (event) => {

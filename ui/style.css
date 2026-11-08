@@ -74,3 +74,36 @@ details pre.mono { margin: 8px 0 0; padding: 8px 10px; background: #f3f5f9; bord
 summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 
 @media (max-width: 640px) { .topbar-inner, main { padding-left: 14px; padding-right: 14px; } .stat-n { font-size: 26px; } }
+
+/* Vehicle detail */
+.vin-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.vin-link:hover { text-decoration: underline; }
+.back { display: inline-block; margin: 4px 0 10px; color: var(--accent); text-decoration: none; font-weight: 600; }
+.back:hover { text-decoration: underline; }
+.detail-title { margin: 6px 0 14px; font-size: 22px; }
+.detail-campaign { color: var(--muted); font-weight: 500; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0; }
+.fact { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow); }
+.fact dt { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+.fact dd { margin: 4px 0 0; font-size: 17px; font-weight: 600; }
+.fact-note { display: block; font-weight: 400; margin-top: 2px; }
+.reasons { margin: 0; padding: 0; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.reasons li { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.reasons li:last-child { border-bottom: 0; }
+.kind-ok { background: #e3f4e8; color: #1c6b3a; }
+.kind-data { background: var(--data-bg); color: var(--data); }
+
+.decision { margin-top: 8px; }
+.status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.status-reviewed { background: #e3f4e8; color: #1c6b3a; }
+.status-follow-up { background: var(--repair-bg); color: var(--repair); }
+.status-no-action { background: #e9ecf1; color: #44505f; }
+.current-decision { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow); margin-bottom: 12px; }
+.note { margin: 8px 0 0; white-space: pre-wrap; }
+.decision-form { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.decision-form fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.decision-form legend { font-weight: 600; padding: 0; margin-bottom: 6px; }
+.choice { font-weight: 500; cursor: pointer; }
+.note-label { font-weight: 600; }
+.decision-form textarea { width: 100%; max-width: 560px; padding: 8px 10px; border: 1px solid #c9d1de; border-radius: 8px; font: inherit; resize: vertical; }
+.decision-form textarea:focus, .vin-link:focus-visible, .back:focus-visible { outline: 3px solid rgba(43,108,176,.35); outline-offset: 1px; }

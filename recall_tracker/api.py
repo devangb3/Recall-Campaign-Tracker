@@ -11,7 +11,7 @@ import logging
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from . import pipeline
 from .contract import Decision, DecisionStatus, to_dict
@@ -133,9 +133,33 @@ class Application:
         return 404, {"error": "API route was not found"}
 
 
+UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+_CONTENT_TYPES = {".html": "text/html; charset=utf-8",
+                  ".css": "text/css; charset=utf-8",
+                  ".js": "text/javascript; charset=utf-8"}
+
+
+def static_file(ui_dir: Path | str, url_path: str) -> tuple[bytes, str] | None:
+    """Bytes and content type of a UI file, or None when it is not served.
+
+    Only .html, .css and .js files inside ui_dir are served. Anything that
+    resolves outside it (for example through ..) is treated as not found.
+    """
+    root = Path(ui_dir).resolve()
+    name = unquote(url_path).lstrip("/") or "index.html"
+    try:
+        target = (root / name).resolve()
+        if (not target.is_relative_to(root) or not target.is_file()
+                or target.suffix not in _CONTENT_TYPES):
+            return None
+        return target.read_bytes(), _CONTENT_TYPES[target.suffix]
+    except (OSError, ValueError):
+        return None
+
+
 def make_server(db_path: Path | str, raw_dir: Path | str, *,
-                host: str = "127.0.0.1", port: int = 8000
-                ) -> ThreadingHTTPServer:
+                host: str = "127.0.0.1", port: int = 8000,
+                ui_dir: Path | str = UI_DIR) -> ThreadingHTTPServer:
     """Create a local server; port=0 is useful for an integration test."""
     app = Application(db_path, raw_dir)
 
@@ -149,8 +173,28 @@ def make_server(db_path: Path | str, raw_dir: Path | str, *,
             self.end_headers()
             self.wfile.write(encoded)
 
+        def _send_static(self, path: str) -> None:
+            found = static_file(ui_dir, path)
+            if found is None:
+                self._send(404, {"error": "File was not found"})
+                return
+            body, content_type = found
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; frame-ancestors 'none'")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self) -> None:
-            self._send(*app.request("GET", self.path))
+            path = urlsplit(self.path).path
+            if path == "/healthz" or path.startswith("/api/"):
+                self._send(*app.request("GET", self.path))
+            else:
+                self._send_static(path)
 
         def do_POST(self) -> None:
             try:

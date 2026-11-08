@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Infinachi Auto Repairs · Recall Campaign Tracker</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <p id="dealer" class="dealer"></p>
+        <h1>Recall Campaign Tracker</h1>
+        <p id="summary" class="subtitle">Dealership recall checks for the Recall Coordinator</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls" aria-label="Check controls">
+      <form id="limit-form">
+        <label for="day-limit">Repair day limit</label>
+        <input id="day-limit" type="number" min="1" step="1" required>
+        <button type="submit">Apply</button>
+        <span class="hint">Days counted from notice to repair, both days included.</span>
+      </form>
+      <button id="run-check" type="button">Run check</button>
+    </section>
+
+    <div id="message" role="alert" hidden></div>
+
+    <div id="report" hidden>
+      <div id="stats" class="stats" aria-label="Summary"></div>
+
+      <section aria-labelledby="findings-title">
+        <h2 id="findings-title">Findings</h2>
+                <div id="findings"></div>
+      </section>
+
+      <section class="data-section" aria-labelledby="data-title">
+        <h2 id="data-title">Missing and bad data</h2>
+        <p class="section-note">These are data problems, not findings. A row listed here is never treated as "not notified".</p>
+        <h3 id="issues-title">Data issues</h3>
+        <div id="data-issues"></div>
+        <h3 id="quality-title">Vehicle data-quality flags</h3>
+        <div id="data-quality"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

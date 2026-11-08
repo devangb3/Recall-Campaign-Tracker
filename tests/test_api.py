@@ -179,3 +179,62 @@ def test_unexpected_failure_returns_only_generic_error(app, monkeypatch, caplog)
     assert set(value) == {"error"}
     assert "internal detail" not in value["error"]
     assert caplog.records
+
+
+# --- Static UI files -------------------------------------------------------
+
+from recall_tracker.api import make_server, static_file  # noqa: E402
+
+
+@pytest.fixture
+def ui(tmp_path):
+    root = tmp_path / "ui"
+    root.mkdir()
+    (root / "index.html").write_text("<h1>home</h1>")
+    (root / "app.js").write_text("1")
+    (root / "notes.txt").write_text("secret")
+    (tmp_path / "outside.html").write_text("outside")
+    return root
+
+
+def test_static_serves_index_and_known_types_only(ui):
+    assert static_file(ui, "/") == (b"<h1>home</h1>", "text/html; charset=utf-8")
+    assert static_file(ui, "/app.js")[1] == "text/javascript; charset=utf-8"
+    assert static_file(ui, "/notes.txt") is None
+    assert static_file(ui, "/missing.html") is None
+
+
+@pytest.mark.parametrize("path", [
+    "/../outside.html", "/%2e%2e/outside.html", "/..%2foutside.html",
+    "//etc/passwd", "/ui/../../outside.html"])
+def test_static_never_leaves_the_ui_folder(ui, path):
+    assert static_file(ui, path) is None
+
+
+def test_server_serves_ui_and_keeps_api_json(tmp_path, ui):
+    import threading
+    import urllib.error
+    import urllib.request
+
+    server = make_server(tmp_path / "r.db", tmp_path, port=0, ui_dir=ui)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urllib.request.urlopen(base + "/") as page:
+            assert page.status == 200
+            assert page.headers["X-Content-Type-Options"] == "nosniff"
+            assert "default-src 'self'" in page.headers["Content-Security-Policy"]
+            assert page.read() == b"<h1>home</h1>"
+        with urllib.request.urlopen(base + "/healthz") as health:
+            assert json.load(health) == {"status": "ok"}
+        with pytest.raises(urllib.error.HTTPError) as missing:
+            urllib.request.urlopen(base + "/nope.html")
+        assert missing.value.code == 404
+        post = urllib.request.Request(base + "/index.html", data=b"{}", method="POST",
+                                      headers={"Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as written:
+            urllib.request.urlopen(post)
+        assert written.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()

@@ -107,3 +107,14 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 .note-label { font-weight: 600; }
 .decision-form textarea { width: 100%; max-width: 560px; padding: 8px 10px; border: 1px solid #c9d1de; border-radius: 8px; font: inherit; resize: vertical; }
 .decision-form textarea:focus, .vin-link:focus-visible, .back:focus-visible { outline: 3px solid rgba(43,108,176,.35); outline-offset: 1px; }
+
+/* Views and check history */
+.views { display: flex; gap: 6px; margin: 4px 0 14px; }
+.views a { padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 600; border: 1px solid var(--line); background: var(--panel); }
+.views a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 6px 0 8px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.filter { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.filter input, .filter select { font: inherit; padding: 6px 8px; border: 1px solid #c9d1de; border-radius: 8px; background: #fff; color: inherit; }
+.filter-count { margin: 6px 0 10px; }
+button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+@media print { .views, .filters { display: none; } }

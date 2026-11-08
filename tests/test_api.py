@@ -15,6 +15,11 @@ def app(small_dir, tmp_path):
     return Application(tmp_path / "recall.db", raw)
 
 
+def record(value):
+    """A run response without the live input_check (a saved run has none)."""
+    return {key: item for key, item in value.items() if key != "input_check"}
+
+
 def checked(app):
     status, value = app.request("POST", "/api/checks", {"check_date": "2026-11-01"})
     assert status == 201, value
@@ -54,6 +59,43 @@ def test_runs_report_when_their_data_was_loaded_and_reuse_keeps_that_time(app):
     assert app.request("GET", "/api/report")[1]["loaded_at"] == loaded
 
 
+def test_report_says_whether_the_input_files_still_match_the_loaded_data(app):
+    result = checked(app)
+    assert result["input_check"] == {"state": "ok", "message": None}
+    assert app.request("GET", "/api/report")[1]["input_check"] == {
+        "state": "ok", "message": None}
+
+
+def test_a_missing_file_after_a_check_is_reported_beside_the_last_good_report(app):
+    first = checked(app)
+    (app.raw_dir / "notices_sent.csv").unlink()
+    status, value = app.request("GET", "/api/report")
+    assert status == 200
+    assert value["run_id"] == first["run_id"]
+    assert value["report"] == first["report"]
+    assert value["input_check"]["state"] == "unusable"
+    assert "notices_sent.csv" in value["input_check"]["message"]
+    # Reusing loaded data (day limit) still says the files cannot be read.
+    status, changed = app.request("POST", "/api/day-limit", {"day_limit": 61})
+    assert status == 201
+    assert changed["input_check"]["state"] == "unusable"
+
+
+def test_a_changed_file_is_reported_without_blocking(app):
+    checked(app)
+    path = app.raw_dir / "notices_sent.csv"
+    path.write_text(path.read_text() + "SYN00000000000000,RC-2026-001,01/01/2026\n")
+    status, value = app.request("GET", "/api/report")
+    assert status == 200
+    assert value["input_check"]["state"] == "changed"
+    assert "notices_sent.csv" in value["input_check"]["message"]
+
+
+def test_a_saved_run_is_a_record_and_carries_no_input_check(app):
+    checked(app)
+    assert "input_check" not in app.request("GET", "/api/runs/1")[1]
+
+
 def test_health_and_default_settings_do_not_create_a_database(app):
     assert app.request("GET", "/healthz") == (200, {"status": "ok"})
     assert app.request("GET", "/api/settings") == (200, {"day_limit": 60})
@@ -86,8 +128,8 @@ def test_bad_upload_preserves_existing_run_decisions_and_day_limit(app):
     assert set(value) == {"error"}
     assert "notices_sent.csv" in value["error"]
     assert "notice_date" in value["error"]
-    assert app.request("GET", "/api/report") == (200, before)
-    assert app.request("GET", "/api/runs/1") == (200, initial)
+    assert record(app.request("GET", "/api/report")[1]) == record(before)
+    assert app.request("GET", "/api/runs/1") == (200, record(initial))
     assert app.request("GET", "/api/settings") == (200, {"day_limit": 60})
     assert len(app.request("GET", "/api/runs")[1]["runs"]) == 1
 
@@ -107,7 +149,7 @@ def test_day_limit_recalculates_and_persists_without_source_files(app):
     assert status == 201
     assert recalculated["ingest_id"] == original["ingest_id"]
     assert recalculated["report"]["day_limit"] == 61
-    assert app.request("GET", "/api/runs/1") == (200, original)
+    assert app.request("GET", "/api/runs/1") == (200, record(original))
 
 
 def test_decisions_and_history_keep_every_entry_while_original_run_is_immutable(app):
@@ -129,7 +171,7 @@ def test_decisions_and_history_keep_every_entry_while_original_run_is_immutable(
                     if (view["vin"], view["campaign_id"]) ==
                     (pair["vin"], pair["campaign_id"]))
     assert selected["decision"]["status"] == "follow up"
-    assert app.request("GET", "/api/runs/1") == (200, original)
+    assert app.request("GET", "/api/runs/1") == (200, record(original))
     status, history = app.request("GET", "/api/history")
     assert status == 200
     assert history["history"] == original["report"]["history"]

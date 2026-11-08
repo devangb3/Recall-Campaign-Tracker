@@ -83,15 +83,50 @@ findings, and report. An unusable file stops before any database write,
 with the file and problem on stderr and exit code 2. An unexpected failure
 rolls back the whole run. Source CSVs and repair records are never edited.
 
-## API for the recall coordinator UI
+## Part 3: the coordinator UI
 
 ```bash
 python3 -m recall_tracker serve --db data/recall.db --raw data/raw --port 8000
 ```
 
-The server defaults to `127.0.0.1`. The UI can proxy `/api/` to this local
-server or call `recall_tracker.api.Application.request` from an existing
-Python app adapter. The existing UI need not change its report contract.
+Open <http://127.0.0.1:8000/>. The same server serves the UI from `ui/` (plain
+HTML, CSS and JavaScript, no build step) and the JSON API below, so there is
+one origin and no CORS. On a new database choose **Run check** to load the
+three CSVs. The page has three views:
+
+- **Flags:** counts, then notification and repair findings (equal weight, no
+  ranking), then "Missing and bad data" with data issues and vehicle
+  data-quality flags kept apart, each with a reason. The repair day limit
+  control (default 60) recalculates the loaded data and the choice persists.
+- **Vehicle detail** (click a VIN): whether the vehicle is on the affected
+  list and in the notices file, the notice and repair dates the check used,
+  inclusive days, the limit and result, every date on file, data problems, and
+  the coordinator decision form (`reviewed`, `follow up`, `no action`, optional
+  note) with the decision history. A vehicle outside the affected list gets no
+  day count.
+- **Check history:** every saved run, every saved check and every decision,
+  with filters (VIN, campaign, kind, check date range, current decision, day
+  limit).
+
+**Export PDF** asks which parts to include and opens the browser's print
+dialog; choose "Save as PDF". If an input file is missing or unreadable the
+page shows only the error (HTTP 422), hides the findings and disables the
+export. A reload or day-limit change after that brings back the last good
+report, but with a warning that the files cannot be read and the export
+disabled; if the files merely changed, the warning says so and the PDF carries
+it too. After such an error a reload or a day-limit change reuses the last
+good data, so the header always says when the CSVs were read ("Data loaded
+from files on ..."; shown in the viewer's time zone). The UI never contacts
+owners or edits source records, and shows every value from the API as plain
+text.
+
+## API for the recall coordinator UI
+
+The server defaults to `127.0.0.1`. `GET /` and the `.html`, `.css` and `.js`
+files under `ui/` are served as static files (GET only); everything under
+`/api/` is JSON. A different front end can call the API directly or call
+`recall_tracker.api.Application.request` from an existing Python app adapter.
+The report contract does not change.
 
 - `POST /api/checks`: ingest the configured CSV folder and save a run.
 - `POST /api/recheck`: check the loaded data again.
@@ -108,7 +143,13 @@ POST requests use `Content-Type: application/json`. Check/recheck requests
 accept optional `check_date` (`YYYY-MM-DD`) and `day_limit` (a positive
 integer). Successful checks return status 201 with `run_id`, `ingest_id`,
 `loaded_at` (when the CSV files behind the run were read, UTC) and `report`;
-the `report` is the existing `contract.to_dict` payload.
+the `report` is the existing `contract.to_dict` payload. A reload or a
+`/api/day-limit` change reuses the loaded data, so `loaded_at` stays the
+same until the CSVs are read again. Run responses and `GET /api/report` (not
+a saved run from `/api/runs/<id>`) also carry `input_check`: `ok` when the CSV
+folder still matches the loaded data, `changed` when a file was edited after
+the load, `unusable` when a file is missing or unreadable now. Each comes with
+a `message`. Nothing is written when this is read.
 File errors return status 422 with only `error`, so a failed load cannot
 look like an empty successful findings list. Invalid choices return 400.
 
@@ -125,3 +166,8 @@ python3 -m pytest            # whole suite, a few seconds
 python3 -m pytest -v         # one line per test
 python3 -m pytest tests/test_plant.py -k date_conflict   # a subset
 ```
+
+`tests/test_ui.py` checks the coordinator UI. Its source checks always run.
+Its browser checks open the page in headless Chrome against a real server and
+checked data, and are skipped when Chrome is not installed (set `CHROME_BIN`
+to use a specific binary).

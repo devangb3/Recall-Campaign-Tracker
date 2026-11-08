@@ -6,9 +6,10 @@ repair outside the chosen day limit, while keeping bad-data evidence
 separate. A recall coordinator reviews the results and records a decision.
 
 The current implementation is a Python backend with a CLI, a local JSON
-API and a SQLite database. The API and report contract are the integration
-points for the coordinator UI; a frontend application and PDF exporter are
-not implemented in this package.
+API and a SQLite database, plus a plain HTML/CSS/JavaScript coordinator UI
+in [ui/](../../ui/) that the same server serves. The API and report
+contract are the integration points for the UI. PDF export uses the
+browser's print-to-PDF; there is no PDF endpoint.
 
 ## Components and responsibilities
 
@@ -42,7 +43,11 @@ not implemented in this package.
   boundary and recalculation of loaded data.
 - [__main__.py](../../recall_tracker/__main__.py) exposes the CLI.
   [api.py](../../recall_tracker/api.py) maps JSON requests to the same
-  pipeline functions and provides the local HTTP server.
+  pipeline functions and provides the local HTTP server, which also serves
+  the UI files.
+- [ui/](../../ui/) is the coordinator UI: `index.html`, `style.css` and
+  `app.js`, with no build step and no dependencies. It reads the API and
+  renders the report payload; see "Coordinator UI" below.
 
 ## Inputs and identity
 
@@ -249,7 +254,56 @@ The `ReportPayload` contains `check_date`, `day_limit`, `findings`,
 `data_quality`, `data_issues`, `vehicles`, `decisions` and `history`.
 Vehicle views expose the selected dates, inclusive count, on-time result,
 current decision and underlying facts. CLI/API run responses wrap the
-serialized report with `run_id` and `ingest_id`.
+serialized report with `run_id` and `ingest_id`; API responses also carry
+`loaded_at`, when the CSVs behind the run were read (the ingest's finish
+time, in UTC), and `input_check`, whether the CSV folder still matches that
+load (`ok`, `changed` or `unusable`; see `pipeline.input_check`). Saved runs
+from `/api/runs/<id>` carry neither.
+
+## Coordinator UI
+
+`ui/app.js` fetches `GET /api/report` and renders three views from the one
+payload, switching by URL hash without a page load:
+
+- **Flags** (`#`): count cards, notification and repair findings (equal
+  standing, payload order), and a separate "Missing and bad data" section for
+  `data_issues` and `data_quality`. The day-limit form posts to
+  `/api/day-limit`; "Run check" posts to `/api/checks`.
+- **Vehicle detail** (`#/vehicle/<vin>/<campaign>`): built from the report's
+  `vehicles` entry. A vehicle outside the affected list (`facts.affected`
+  empty) shows no day count. The decision form posts `vin`, `campaign_id`,
+  `status` and an optional `note` to `/api/decisions`, never `decided_on`
+  (the server uses today's date, so the new decision is the current one), and
+  reloads the report.
+- **Check history** (`#/history`): saved runs from `/api/runs`, plus every
+  saved check and decision from the report's `history` and `decisions`,
+  filtered in the browser.
+
+Rules the UI follows:
+
+- Only HTTP 422 (an unusable input file) hides the findings and shows the
+  error alone. A 400 on first load means no check has run yet. Other errors
+  show a message and leave the screen as it is.
+- Reload and day-limit changes use the already loaded data, not the CSVs, so
+  after a file error they bring back the last good report. The header says
+  when the data was loaded (`loaded_at`), and `input_check` drives a warning
+  banner: `unusable` disables Export PDF, and `changed` adds the warning to
+  the PDF cover. The print-only copy is cleared whenever the screen changes
+  (a new report or an error), so Ctrl+P never prints an earlier export.
+- Every value from the API, including `raw_row` and technician notes, is
+  written with `textContent`, never as HTML.
+- Dates are shown as `YYYY-MM-DD`. Reason text from the server uses
+  `MM/DD/YYYY`, so the UI rewrites real dates when displaying them; values
+  that are not real dates stay as written.
+- No control contacts owners, edits a source record or decides for the
+  coordinator.
+
+**Export PDF** opens a dialog to choose the parts (findings, missing and bad
+data, vehicle detail, saved runs, every saved check, decisions). `app.js`
+builds a print-only copy of the loaded report, hidden on screen and shown by
+the `@media print` rules in `style.css`, and calls `window.print()`; the
+coordinator chooses "Save as PDF". The raw rows of data issues are left out of
+the PDF. The button is disabled when no report is loaded.
 
 ## CLI and API boundaries
 
@@ -260,8 +314,10 @@ separate modules. See the [README](../../README.md) for runnable examples.
 `serve` uses Python's `ThreadingHTTPServer`, listening on `127.0.0.1:8000`
 by default. Each operation opens its own database connection; the API
 delegates domain behavior to the pipeline. An existing Python app can
-also call `Application.request()` directly. A browser UI can proxy `/api/`
-to the local server.
+also call `Application.request()` directly. `GET /` and the `.html`, `.css`
+and `.js` files under `ui/` are served as static files (GET only, nothing
+outside `ui/`, `nosniff` and a `default-src 'self'` content security
+policy). The UI and the API share one origin, so there are no CORS headers.
 
 Write routes are `POST /api/checks`, `/api/recheck`, `/api/day-limit` and
 `/api/decisions`. Read routes are `GET /api/report`, `/api/runs`,
@@ -290,7 +346,11 @@ database service. `requirements.txt` pins pytest for tests;
 The test layers cover generator determinism and planted cases;
 normalization/ingest and database contracts; affected lists and snapshots;
 business-rule boundaries; storage round trips and history; full pipeline
-rollback and recalculation; and API/CLI behavior. In particular,
+rollback and recalculation; API/CLI behavior; and the UI.
+[test_ui.py](../../tests/test_ui.py) checks the UI source (no HTML built from
+data, no inline script, every looked-up element exists) and, when Chrome is
+installed, renders the page against a real server and checked data to compare
+what is shown with the report payload. In particular,
 [test_pipeline.py](../../tests/test_pipeline.py) exercises the rules through
 the actual generator and ingest, including day 60/61, quarantined notices,
 unchanged source files, persisted limits and retained decisions.

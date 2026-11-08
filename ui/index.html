@@ -30,8 +30,13 @@
         <button type="submit">Apply</button>
         <span class="hint">Days counted from notice to repair, both days included.</span>
       </form>
-      <button id="run-check" type="button">Run check</button>
+      <div class="actions">
+        <button id="export-pdf" type="button" class="secondary" disabled>Export PDF</button>
+        <button id="run-check" type="button">Run check</button>
+      </div>
     </section>
+
+    <div id="input-warning" class="warning" role="alert" hidden></div>
 
     <div id="message" role="alert" hidden></div>
 
@@ -56,6 +61,21 @@
         <div id="data-quality"></div>
       </section>
     </div>
+
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <form id="export-form">
+        <h2 id="export-title">Export PDF</h2>
+        <p class="hint">Choose what to include. The summary at the top is always included. In the print window, choose &ldquo;Save as PDF&rdquo;.</p>
+        <div id="export-options"></div>
+        <div class="dialog-actions">
+          <button type="button" id="export-cancel" class="secondary">Cancel</button>
+          <button type="submit">Create PDF</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Built by app.js for printing only; hidden on screen. -->
+    <div id="print-report" aria-hidden="true"></div>
   </main>
 
   <script src="/app.js"></script>

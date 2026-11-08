@@ -256,7 +256,9 @@ Vehicle views expose the selected dates, inclusive count, on-time result,
 current decision and underlying facts. CLI/API run responses wrap the
 serialized report with `run_id` and `ingest_id`; API responses also carry
 `loaded_at`, when the CSVs behind the run were read (the ingest's finish
-time, in UTC).
+time, in UTC), and `input_check`, whether the CSV folder still matches that
+load (`ok`, `changed` or `unusable`; see `pipeline.input_check`). Saved runs
+from `/api/runs/<id>` carry neither.
 
 ## Coordinator UI
 
@@ -284,8 +286,10 @@ Rules the UI follows:
   show a message and leave the screen as it is.
 - Reload and day-limit changes use the already loaded data, not the CSVs, so
   after a file error they bring back the last good report. The header says
-  when the data was loaded (`loaded_at`) so that report is not mistaken for
-  fresh data.
+  when the data was loaded (`loaded_at`), and `input_check` drives a warning
+  banner: `unusable` disables Export PDF, and `changed` adds the warning to
+  the PDF cover. The print-only copy is cleared whenever the screen changes
+  (a new report or an error), so Ctrl+P never prints an earlier export.
 - Every value from the API, including `raw_row` and technician notes, is
   written with `textContent`, never as HTML.
 - Dates are shown as `YYYY-MM-DD`. Reason text from the server uses

@@ -85,8 +85,14 @@ class Application:
             logging.getLogger(__name__).exception("Recall API action failed")
             return 500, {"error": "The action could not be completed; nothing was changed."}
 
-    def _run(self, run: SavedRun) -> dict:
-        return run_dict(run, pipeline.ingest_loaded_at(self.db_path, run.ingest_id))
+    def _run(self, run: SavedRun, *, inputs: bool = True) -> dict:
+        value = run_dict(run, pipeline.ingest_loaded_at(self.db_path, run.ingest_id))
+        if inputs:
+            # Whether the CSV folder still matches the loaded data. A saved
+            # run is a record of its own time, so it carries no such check.
+            value["input_check"] = pipeline.input_check(
+                self.db_path, self.raw_dir, run.ingest_id)
+        return value
 
     def _request(self, method: str, path: str, body: object) -> tuple[int, dict]:
         if method == "GET":
@@ -107,7 +113,7 @@ class Application:
                     run_id = int(path.removeprefix("/api/runs/"))
                 except ValueError as exc:
                     raise ValueError("run_id must be a positive whole number") from exc
-                return 200, self._run(pipeline.saved_run(self.db_path, run_id))
+                return 200, self._run(pipeline.saved_run(self.db_path, run_id), inputs=False)
             if path == "/api/history":
                 report = to_dict(pipeline.current_report(self.db_path).report)
                 return 200, {"history": report["history"],

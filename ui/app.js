@@ -128,7 +128,26 @@ function showNoCheckYet() {
 // the header must say how old it is (the files are not re-read on those).
 function loadedText(iso) {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "at an unknown time" : `on ${d.toLocaleString()}`;
+  if (Number.isNaN(d.getTime())) return "at an unknown time";
+  // Same year-month-day style as every other date on screen, in the
+  // viewer's own time zone. The generic name (ET, not EST or EDT) stays right
+  // in both summer and winter time.
+  const pad = (n) => String(n).padStart(2, "0");
+  const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "shortGeneric" })
+    .formatToParts(d).find((part) => part.type === "timeZoneName");
+  return `on ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}${zone ? ` ${zone.value}` : ""}`;
+}
+
+// The server words data problems with the CSV style MM/DD/YYYY. Show real
+// dates the way the rest of the screen does (YYYY-MM-DD). A value that is not
+// a real date (13/01/2026, 02/30/2026) stays as written: it is the problem.
+function isoDates(text) {
+  return text.replace(/\b(\d{2})\/(\d{2})\/(\d{4})\b/g, (found, mm, dd, yyyy) => {
+    const d = new Date(Date.UTC(+yyyy, +mm - 1, +dd));
+    const real = d.getUTCFullYear() === +yyyy && d.getUTCMonth() === +mm - 1 && d.getUTCDate() === +dd;
+    return real ? `${yyyy}-${mm}-${dd}` : found;
+  });
 }
 
 function render(result) {
@@ -158,7 +177,7 @@ function render(result) {
   fill("findings", report.findings.length === 0
     ? empty("No findings in this check.")
     : table(["VIN", "Campaign", "Kind", "Reason"], report.findings, (f) =>
-        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), el("span", f.kind, `kind kind-${f.kind}`), f.reason]));
+        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), el("span", f.kind, `kind kind-${f.kind}`), isoDates(f.reason)]));
 
   fill("data-issues", report.data_issues.length === 0
     ? empty("No data issues.")
@@ -170,13 +189,13 @@ function render(result) {
           return [el("span", `${d.file} \u00b7 row ${d.src_row}`, "nowrap"), codeCell(d),
                   issueVin(report, d),
                   d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"),
-                  d.reason, details];
+                  isoDates(d.reason), details];
         }));
 
   fill("data-quality", report.data_quality.length === 0
     ? empty("No vehicle data-quality flags.")
     : table(["VIN", "Campaign", "Reason"], report.data_quality, (f) =>
-        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), f.reason]));
+        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), isoDates(f.reason)]));
 
   route();
 }
@@ -334,7 +353,7 @@ function renderHistory(report) {
         (h) => {
           const d = decisionOf(h);
           return [el("span", h.check_date, "nowrap"), vehicleCell(h), el("span", h.campaign_id, "nowrap"),
-            kindBadge(h.kind), h.reason, h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
+            kindBadge(h.kind), isoDates(h.reason), h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
         }));
 
     // Decisions follow the VIN and campaign filters. The other filters are about checks.
@@ -475,7 +494,7 @@ function buildPrintReport(result, runs, choice) {
     const sec = printSection(root, `Findings (${report.findings.length})`, "tone-findings");
     printTable(sec, ["VIN", "Campaign", "Kind", "Reason"], report.findings,
       (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"),
-        el("span", f.kind, `kind kind-${f.kind}`), f.reason], "No findings in this check.");
+        el("span", f.kind, `kind kind-${f.kind}`), isoDates(f.reason)], "No findings in this check.");
   }
 
   if (choice.data) {
@@ -485,11 +504,11 @@ function buildPrintReport(result, runs, choice) {
     printTable(sec, ["File and row", "Code and action", "VIN", "Campaign", "Reason"], report.data_issues,
       (d) => [el("span", `${d.file} · row ${d.src_row}`, "nowrap"), codeCell(d),
         d.vin === null ? "not readable" : el("span", d.vin, "mono"),
-        d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"), d.reason],
+        d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"), isoDates(d.reason)],
       "No data issues.");
     sec.appendChild(el("h3", `Vehicle data-quality flags (${report.data_quality.length})`));
     printTable(sec, ["VIN", "Campaign", "Reason"], report.data_quality,
-      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"), f.reason],
+      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"), isoDates(f.reason)],
       "No vehicle data-quality flags.");
   }
 
@@ -498,13 +517,14 @@ function buildPrintReport(result, runs, choice) {
     const sec = printSection(root, `Vehicle detail (${detail.length})`, "tone-vehicles",
       "Every vehicle with a finding, a data-quality flag or a coordinator decision. " +
       "With no repair on file, days are counted from the notice to the check date.");
-    printTable(sec, ["VIN", "Campaign", "In notices", "Notice used", "Repair used", "Days", "Limit",
+    printTable(sec, ["VIN", "Campaign", "In affected list", "In notices", "Notice used", "Repair used", "Days", "Limit",
       "Result", "Current decision", "Data problems"], detail,
-      (v) => [el("span", v.vin, "mono"), el("span", v.campaign_id, "nowrap"), v.in_notices ? "Yes" : "No",
+      (v) => [el("span", v.vin, "mono"), el("span", v.campaign_id, "nowrap"),
+        inAffectedList(v) ? "Yes" : "No", v.in_notices ? "Yes" : "No",
         v.notice_date_used, v.repair_date_used,
-        v.inclusive_days === null ? null : String(v.inclusive_days), v.day_limit, repairResult(v),
+        inAffectedList(v) && v.inclusive_days !== null ? String(v.inclusive_days) : null, v.day_limit, repairResult(v),
         v.decision === null ? "—" : statusBadge(v.decision.status),
-        v.data_quality_reasons.length === 0 ? "—" : v.data_quality_reasons.join(" ")],
+        v.data_quality_reasons.length === 0 ? "—" : isoDates(v.data_quality_reasons.join(" "))],
       "No vehicles have findings, flags or decisions.");
   }
 
@@ -525,7 +545,7 @@ function buildPrintReport(result, runs, choice) {
       (h) => {
         const d = currentBy.get(`${h.vin}\u0000${h.campaign_id}`);
         return [el("span", h.check_date, "nowrap"), el("span", h.vin, "mono"), el("span", h.campaign_id, "nowrap"),
-          kindBadge(h.kind), h.reason, h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
+          kindBadge(h.kind), isoDates(h.reason), h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
       }, "No checks have been saved yet.");
   }
 
@@ -612,7 +632,14 @@ function sameVehicle(vin, campaign) {
   return (row) => row.vin === vin && row.campaign_id === campaign;
 }
 
+// The check only runs for vehicles on the affected list. A notice or repair
+// row for any other vehicle is a data-quality flag, so no day count applies.
+function inAffectedList(v) {
+  return v.facts.affected.length > 0;
+}
+
 function repairResult(v) {
+  if (!inAffectedList(v)) return "Not applicable (not in the affected list)";
   if (v.on_time === true) return el("span", "On time", "kind kind-ok");
   if (v.on_time === false) return el("span", "Late", "kind kind-repair");
   return v.notice_date_used === null
@@ -640,6 +667,9 @@ function renderDetail(report, vin, campaign) {
 
   // What the check used.
   const facts = el("dl", null, "facts");
+  const affected = inAffectedList(v);
+  facts.appendChild(fact("In affected list", affected ? "Yes" : "No",
+    affected ? "" : "not checked for notice or repair days"));
   facts.appendChild(fact("In notices file", v.in_notices ? "Yes" : "No"));
   facts.appendChild(fact("Notice date used",
     v.notice_date_used === null ? "No usable notice date" : v.notice_date_used,
@@ -647,11 +677,14 @@ function renderDetail(report, vin, campaign) {
   facts.appendChild(fact("Repair date used",
     v.repair_date_used === null ? "No usable repair" : v.repair_date_used,
     v.repair_date_used === null ? "" : "earliest repair on or after the notice"));
-  facts.appendChild(fact(
-    v.repair_date_used === null ? "Days since notice" : "Inclusive days, notice to repair",
-    v.inclusive_days === null ? "\u2014" : String(v.inclusive_days),
-    v.repair_date_used === null && v.inclusive_days !== null
-      ? `counted to the check date ${report.check_date}` : ""));
+  // No day count for a vehicle outside the affected list: it would look overdue.
+  if (affected) {
+    facts.appendChild(fact(
+      v.repair_date_used === null ? "Days since notice" : "Inclusive days, notice to repair",
+      v.inclusive_days === null ? "\u2014" : String(v.inclusive_days),
+      v.repair_date_used === null && v.inclusive_days !== null
+        ? `counted to the check date ${report.check_date}` : ""));
+  }
   facts.appendChild(fact("Day limit", `${v.day_limit} days`));
   facts.appendChild(fact("Repair result", repairResult(v)));
   root.appendChild(facts);
@@ -667,7 +700,7 @@ function renderDetail(report, vin, campaign) {
     found.forEach((f) => {
       const li = el("li");
       li.appendChild(el("span", f.kind, `kind kind-${f.kind}`));
-      li.appendChild(el("span", ` ${f.reason}`));
+      li.appendChild(el("span", ` ${isoDates(f.reason)}`));
       list.appendChild(li);
     });
     root.appendChild(list);
@@ -689,7 +722,7 @@ function renderDetail(report, vin, campaign) {
   if (problems.size > 0) {
     root.appendChild(el("h3", "Data problems (not findings)"));
     const list = el("ul", null, "reasons");
-    problems.forEach((text) => list.appendChild(el("li", text)));
+    problems.forEach((text) => list.appendChild(el("li", isoDates(text))));
     root.appendChild(list);
   }
 

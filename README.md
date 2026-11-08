@@ -107,7 +107,8 @@ Python app adapter. The existing UI need not change its report contract.
 POST requests use `Content-Type: application/json`. Check/recheck requests
 accept optional `check_date` (`YYYY-MM-DD`) and `day_limit` (a positive
 integer). Successful checks return status 201 with `run_id`, `ingest_id`,
-and `report`; the `report` is the existing `contract.to_dict` payload.
+`loaded_at` (when the CSV files behind the run were read, UTC) and `report`;
+the `report` is the existing `contract.to_dict` payload.
 File errors return status 422 with only `error`, so a failed load cannot
 look like an empty successful findings list. Invalid choices return 400.
 

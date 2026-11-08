@@ -186,6 +186,16 @@ def saved_run(db_path: Path | str, run_id: int) -> SavedRun:
         return CheckStore(con).get_run(run_id)
 
 
+def ingest_loaded_at(db_path: Path | str, ingest_id: int) -> str:
+    """When the CSV files behind an ingest finished loading (UTC, ISO text)."""
+    with _read(db_path) as con:
+        row = con.execute("SELECT finished_at FROM ingests WHERE ingest_id = ?",
+                          (ingest_id,)).fetchone()
+    if row is None:
+        raise PipelineError(f"Ingest {ingest_id} was not found.")
+    return row[0]
+
+
 def current_report(db_path: Path | str) -> SavedRun:
     """Latest saved check results with current decisions and complete history."""
     with _read(db_path) as con:

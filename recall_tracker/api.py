@@ -20,10 +20,17 @@ from .ingest import IngestStopError
 from .storage import SavedRun
 
 
-def run_dict(run: SavedRun) -> dict:
-    """Run identity around the unchanged, JSON-ready report contract."""
-    return {"run_id": run.run_id, "ingest_id": run.ingest_id,
-            "report": to_dict(run.report)}
+def run_dict(run: SavedRun, loaded_at: str | None = None) -> dict:
+    """Run identity around the unchanged, JSON-ready report contract.
+
+    ``loaded_at`` is when the CSV files behind the run were read. It is
+    outside the report so the contract payload keeps its shape.
+    """
+    value = {"run_id": run.run_id, "ingest_id": run.ingest_id,
+             "report": to_dict(run.report)}
+    if loaded_at is not None:
+        value["loaded_at"] = loaded_at
+    return value
 
 
 def _date_field(body: dict, name: str, default: date | None = None
@@ -78,6 +85,9 @@ class Application:
             logging.getLogger(__name__).exception("Recall API action failed")
             return 500, {"error": "The action could not be completed; nothing was changed."}
 
+    def _run(self, run: SavedRun) -> dict:
+        return run_dict(run, pipeline.ingest_loaded_at(self.db_path, run.ingest_id))
+
     def _request(self, method: str, path: str, body: object) -> tuple[int, dict]:
         if method == "GET":
             if path == "/healthz":
@@ -85,7 +95,7 @@ class Application:
             if path == "/api/settings":
                 return 200, pipeline.settings(self.db_path)
             if path == "/api/report":
-                return 200, run_dict(pipeline.current_report(self.db_path))
+                return 200, self._run(pipeline.current_report(self.db_path))
             if path == "/api/runs":
                 return 200, {"runs": [{
                     "run_id": run.run_id, "ingest_id": run.ingest_id,
@@ -97,7 +107,7 @@ class Application:
                     run_id = int(path.removeprefix("/api/runs/"))
                 except ValueError as exc:
                     raise ValueError("run_id must be a positive whole number") from exc
-                return 200, run_dict(pipeline.saved_run(self.db_path, run_id))
+                return 200, self._run(pipeline.saved_run(self.db_path, run_id))
             if path == "/api/history":
                 report = to_dict(pipeline.current_report(self.db_path).report)
                 return 200, {"history": report["history"],
@@ -114,7 +124,7 @@ class Application:
                 run = (action(self.raw_dir, self.db_path, **arguments)
                        if path == "/api/checks"
                        else action(self.db_path, **arguments))
-                return 201, run_dict(run)
+                return 201, self._run(run)
             if path == "/api/decisions":
                 values = _fields(body, {"vin", "campaign_id", "status", "note",
                                         "decided_on"})

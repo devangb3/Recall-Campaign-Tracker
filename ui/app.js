@@ -110,6 +110,7 @@ function showError(text) {
   current = null;
   $("report").hidden = true;
   $("detail").hidden = true;
+  $("history").hidden = true;
   showMessage(text, true);
 }
 
@@ -117,6 +118,7 @@ function showNoCheckYet() {
   current = null;
   $("report").hidden = true;
   $("detail").hidden = true;
+  $("history").hidden = true;
   showMessage("No check has been run yet. Choose “Run check” to load the three CSV files.", false);
 }
 
@@ -178,6 +180,176 @@ function render(result) {
 
 // ---- Vehicle detail (REC-27) ------------------------------------------------
 
+// ---- Check history (REC-26) ----------------------------------------------
+// Read-only. Shows every saved check result and every decision; it never
+// reruns a check or edits anything. Filters work on the report already loaded.
+
+const HISTORY_ROW_LIMIT = 500;
+const historyFilters = { vin: "", campaign: "", kind: "", from: "", to: "", decision: "", limit: "" };
+
+function kindBadge(kind) {
+  return el("span", kind, `kind kind-${kind === "data quality" ? "data" : kind}`);
+}
+
+// Current decision per vehicle and campaign: latest decided_on, then the
+// later record wins. Same rule as the server (contract/decision.py).
+function currentDecisions(decisions) {
+  const byPair = new Map();
+  decisions.forEach((d) => {
+    const key = `${d.vin}\u0000${d.campaign_id}`;
+    const best = byPair.get(key);
+    if (best === undefined || d.decided_on >= best.decided_on) byPair.set(key, d);
+  });
+  return byPair;
+}
+
+function distinct(values) {
+  return Array.from(new Set(values)).sort();
+}
+
+function filterField(labelText, control) {
+  const wrap = el("label", null, "filter");
+  wrap.appendChild(el("span", labelText));
+  wrap.appendChild(control);
+  return wrap;
+}
+
+function selectOf(options, value, onChange) {
+  const select = el("select");
+  options.forEach(([val, text]) => {
+    const option = el("option", text);
+    option.value = val;
+    select.appendChild(option);
+  });
+  select.value = value;
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function inputOf(type, value, onChange, placeholder) {
+  const input = el("input");
+  input.type = type;
+  input.value = value;
+  if (placeholder) input.placeholder = placeholder;
+  input.addEventListener("input", () => onChange(input.value));
+  return input;
+}
+
+function renderHistory(report) {
+  const root = $("history");
+  root.replaceChildren();
+  const known = new Set(report.vehicles.map((v) => `${v.vin}\u0000${v.campaign_id}`));
+  const currentBy = currentDecisions(report.decisions);
+  const decisionOf = (row) => currentBy.get(`${row.vin}\u0000${row.campaign_id}`);
+  const vehicleCell = (row) => known.has(`${row.vin}\u0000${row.campaign_id}`)
+    ? vehicleLink(row.vin, row.campaign_id) : el("span", row.vin, "mono");
+
+  root.appendChild(el("h2", "Check history"));
+  root.appendChild(el("p",
+    "Every saved check and every coordinator decision. Nothing here reruns a check or changes a record.",
+    "section-note"));
+
+  // Saved runs (filled in when /api/runs answers).
+  root.appendChild(el("h3", "Saved runs"));
+  const runsBox = el("div");
+  runsBox.appendChild(empty("Loading saved runs…"));
+  root.appendChild(runsBox);
+  api("GET", "/api/runs").then(({ status, data }) => {
+    if (status !== 200) {
+      runsBox.replaceChildren(empty(data.error || "The saved runs could not be loaded."));
+      return;
+    }
+    const runs = data.runs.slice().reverse();
+    runsBox.replaceChildren(runs.length === 0 ? empty("No saved runs.") : table(
+      ["Run", "Check date", "Repair day limit", "Data load (ingest)"], runs,
+      (r) => [r.run_id, r.check_date, r.day_limit, r.ingest_id]));
+  });
+
+  // Filters.
+  root.appendChild(el("h3", "Findings checked over time"));
+  const bar = el("div", null, "filters");
+  const results = el("div");
+  const count = el("p", null, "hint filter-count");
+  const rerun = () => showResults();
+  const set = (key) => (value) => { historyFilters[key] = value; rerun(); };
+  const all = (text) => ["", text];
+  bar.appendChild(filterField("VIN contains", inputOf("search", historyFilters.vin, set("vin"), "e.g. SYN4P")));
+  bar.appendChild(filterField("Campaign", selectOf(
+    [all("Any")].concat(distinct(report.history.map((h) => h.campaign_id)).map((c) => [c, c])),
+    historyFilters.campaign, set("campaign"))));
+  bar.appendChild(filterField("Kind", selectOf(
+    [all("Any"), ["notification", "notification"], ["repair", "repair"], ["data quality", "data quality"]],
+    historyFilters.kind, set("kind"))));
+  bar.appendChild(filterField("Check date from", inputOf("date", historyFilters.from, set("from"))));
+  bar.appendChild(filterField("to", inputOf("date", historyFilters.to, set("to"))));
+  bar.appendChild(filterField("Current decision", selectOf(
+    [all("Any"), ["none", "No decision yet"], ["reviewed", "reviewed"], ["follow up", "follow up"], ["no action", "no action"]],
+    historyFilters.decision, set("decision"))));
+  bar.appendChild(filterField("Day limit used", selectOf(
+    [all("Any")].concat(distinct(report.history.map((h) => h.day_limit)).sort((a, b) => a - b)
+      .map((n) => [String(n), String(n)])),
+    historyFilters.limit, set("limit"))));
+  const clear = el("button", "Clear filters", "secondary");
+  clear.type = "button";
+  clear.addEventListener("click", () => {
+    Object.keys(historyFilters).forEach((k) => { historyFilters[k] = ""; });
+    renderHistory(report);
+  });
+  bar.appendChild(clear);
+  root.appendChild(bar);
+  root.appendChild(count);
+  root.appendChild(results);
+
+  // Newest first; among the same check date the later record comes first.
+  const ordered = report.history.slice().reverse()
+    .sort((a, b) => (a.check_date < b.check_date ? 1 : a.check_date > b.check_date ? -1 : 0));
+
+  function matches(row) {
+    const f = historyFilters;
+    if (f.vin.trim() !== "" && !row.vin.toLowerCase().includes(f.vin.trim().toLowerCase())) return false;
+    if (f.campaign !== "" && row.campaign_id !== f.campaign) return false;
+    if (f.kind !== "" && row.kind !== f.kind) return false;
+    if (f.from !== "" && row.check_date < f.from) return false;
+    if (f.to !== "" && row.check_date > f.to) return false;
+    if (f.limit !== "" && String(row.day_limit) !== f.limit) return false;
+    if (f.decision !== "") {
+      const d = decisionOf(row);
+      if (f.decision === "none" ? d !== undefined : d === undefined || d.status !== f.decision) return false;
+    }
+    return true;
+  }
+
+  function showResults() {
+    const rows = ordered.filter(matches);
+    const shown = rows.slice(0, HISTORY_ROW_LIMIT);
+    count.textContent = `Showing ${shown.length} of ${rows.length} matching checks (${ordered.length} saved in total)` +
+      (rows.length > shown.length ? `. Narrow the filters to see the rest.` : ".");
+    results.replaceChildren();
+    results.appendChild(rows.length === 0
+      ? empty(ordered.length === 0 ? "No checks have been saved yet." : "No checks match these filters.")
+      : table(["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"], shown,
+        (h) => {
+          const d = decisionOf(h);
+          return [el("span", h.check_date, "nowrap"), vehicleCell(h), el("span", h.campaign_id, "nowrap"),
+            kindBadge(h.kind), h.reason, h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
+        }));
+
+    // Decisions follow the VIN and campaign filters. The other filters are about checks.
+    const f = historyFilters;
+    const decisions = report.decisions.slice().reverse()
+      .sort((a, b) => (a.decided_on < b.decided_on ? 1 : a.decided_on > b.decided_on ? -1 : 0))
+      .filter((d) => (f.vin.trim() === "" || d.vin.toLowerCase().includes(f.vin.trim().toLowerCase())) &&
+        (f.campaign === "" || d.campaign_id === f.campaign));
+    results.appendChild(el("h3", `Coordinator decisions (${decisions.length})`));
+    results.appendChild(decisions.length === 0
+      ? empty(report.decisions.length === 0 ? "No decisions have been recorded yet." : "No decisions match the VIN and campaign filters.")
+      : table(["Decided on", "VIN", "Campaign", "Status", "Note"], decisions,
+        (d) => [el("span", d.decided_on, "nowrap"), vehicleCell(d), el("span", d.campaign_id, "nowrap"),
+          statusBadge(d.status), d.note]));
+  }
+  showResults();
+}
+
 function route() {
   if (current === null) return;
   const match = /^#\/vehicle\/([^/]+)\/([^/]+)$/.exec(location.hash);
@@ -186,11 +358,17 @@ function route() {
     try { parts = [decodeURIComponent(match[1]), decodeURIComponent(match[2])]; }
     catch (err) { parts = null; }
   }
-  $("report").hidden = parts !== null;
+  const onHistory = location.hash === "#/history";
+  $("report").hidden = parts !== null || onHistory;
   $("detail").hidden = parts === null;
+  $("history").hidden = !onHistory;
+  $("nav-flags").classList.toggle("active", !onHistory && parts === null);
+  $("nav-history").classList.toggle("active", onHistory);
   if (parts !== null) {
     renderDetail(current.report, parts[0], parts[1]);
     window.scrollTo(0, 0);
+  } else if (onHistory) {
+    renderHistory(current.report);
   }
 }
 

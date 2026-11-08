@@ -111,7 +111,10 @@ three CSVs. The page has three views:
 **Export PDF** asks which parts to include and opens the browser's print
 dialog; choose "Save as PDF". If an input file is missing or unreadable the
 page shows only the error (HTTP 422), hides the findings and disables the
-export. After such an error a reload or a day-limit change reuses the last
+export. A reload or day-limit change after that brings back the last good
+report, but with a warning that the files cannot be read and the export
+disabled; if the files merely changed, the warning says so and the PDF carries
+it too. After such an error a reload or a day-limit change reuses the last
 good data, so the header always says when the CSVs were read ("Data loaded
 from files on ..."; shown in the viewer's time zone). The UI never contacts
 owners or edits source records, and shows every value from the API as plain
@@ -142,7 +145,11 @@ integer). Successful checks return status 201 with `run_id`, `ingest_id`,
 `loaded_at` (when the CSV files behind the run were read, UTC) and `report`;
 the `report` is the existing `contract.to_dict` payload. A reload or a
 `/api/day-limit` change reuses the loaded data, so `loaded_at` stays the
-same until the CSVs are read again.
+same until the CSVs are read again. Run responses and `GET /api/report` (not
+a saved run from `/api/runs/<id>`) also carry `input_check`: `ok` when the CSV
+folder still matches the loaded data, `changed` when a file was edited after
+the load, `unusable` when a file is missing or unreadable now. Each comes with
+a `message`. Nothing is written when this is read.
 File errors return status 422 with only `error`, so a failed load cannot
 look like an empty successful findings list. Invalid choices return 400.
 

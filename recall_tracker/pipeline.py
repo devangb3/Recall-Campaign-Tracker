@@ -6,6 +6,7 @@ inputs; his ingest is the only parser and normalizer used by the tool.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
@@ -194,6 +195,31 @@ def ingest_loaded_at(db_path: Path | str, ingest_id: int) -> str:
     if row is None:
         raise PipelineError(f"Ingest {ingest_id} was not found.")
     return row[0]
+
+
+def input_check(db_path: Path | str, raw_dir: Path | str, ingest_id: int) -> dict:
+    """Do the CSV files in ``raw_dir`` still match the data behind a run?
+
+    Reads the files and writes nothing. ``ok``: same bytes as when loaded.
+    ``changed``: readable, but edited or replaced since. ``unusable``: a file
+    is missing or unreadable now, so a new check would stop. A reload or a
+    day-limit change reuses the loaded data and never looks at the files, so
+    this is how the screen and the PDF learn that the data may be old.
+    """
+    try:
+        files = ingest.read_all(Path(raw_dir))
+    except ingest.IngestStopError as exc:
+        return {"state": "unusable", "message": str(exc)}
+    with _read(db_path) as con:
+        row = con.execute("SELECT files FROM ingests WHERE ingest_id = ?",
+                          (ingest_id,)).fetchone()
+    loaded = json.loads(row[0]) if row else {}
+    differ = [name for name, raw in files.items()
+              if loaded.get(name, {}).get("sha256") != raw.sha256]
+    if differ:
+        return {"state": "changed", "message":
+                f"{', '.join(differ)} changed after the data was loaded."}
+    return {"state": "ok", "message": None}
 
 
 def current_report(db_path: Path | str) -> SavedRun:

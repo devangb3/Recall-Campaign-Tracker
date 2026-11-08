@@ -73,6 +73,29 @@ def test_page_title_and_header_use_the_one_client_name():
     assert name in re.search(r"<title>(.*?)</title>", INDEX).group(1)
 
 
+def js_function(name: str) -> str:
+    """The source of one top-level function in app.js."""
+    start = APP_CODE.index(f"function {name}(")
+    end = APP_CODE.find("\nfunction ", start + 1)
+    return APP_CODE[start:end if end != -1 else len(APP_CODE)]
+
+
+@pytest.mark.parametrize("name", ["showError", "showNoCheckYet", "render"])
+def test_old_print_copy_is_cleared_whenever_the_screen_changes(name):
+    """Ctrl+P must never print an earlier export after an error or new data."""
+    assert "clearPrintCopy()" in js_function(name)
+
+
+def test_clearing_the_print_copy_empties_the_print_only_element():
+    body = js_function("clearPrintCopy")
+    assert '$("print-report")' in body and "replaceChildren()" in body
+
+
+def test_pdf_says_when_the_files_changed_and_export_waits_for_readable_files():
+    assert "input_check" in js_function("render")
+    assert "input_check" in js_function("buildPrintReport")
+
+
 def test_stylesheet_braces_balance():
     assert STYLE.count("{") == STYLE.count("}")
 
@@ -185,6 +208,39 @@ def empty_site(tmp_path_factory):
     """A server that has never run a check."""
     root = tmp_path_factory.mktemp("ui_empty")
     server, base = serve(root / "none.db", root)
+    yield base
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture(scope="module")
+def broken_site(small_dir, tmp_path_factory):
+    """A checked database whose notices file has since gone missing."""
+    root = tmp_path_factory.mktemp("ui_broken")
+    raw = root / "raw"
+    shutil.copytree(small_dir, raw)
+    db = root / "recall.db"
+    assert Application(db, raw).request(
+        "POST", "/api/checks", {"check_date": "2026-11-01"})[0] == 201
+    (raw / "notices_sent.csv").unlink()
+    server, base = serve(db, raw)
+    yield base
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture(scope="module")
+def changed_site(small_dir, tmp_path_factory):
+    """A checked database whose notices file was edited after the check."""
+    root = tmp_path_factory.mktemp("ui_changed")
+    raw = root / "raw"
+    shutil.copytree(small_dir, raw)
+    db = root / "recall.db"
+    assert Application(db, raw).request(
+        "POST", "/api/checks", {"check_date": "2026-11-01"})[0] == 201
+    notices = raw / "notices_sent.csv"
+    notices.write_text(notices.read_text() + "SYN00000000000000,RC-2026-001,01/01/2026\n")
+    server, base = serve(db, raw)
     yield base
     server.shutdown()
     server.server_close()
@@ -346,3 +402,31 @@ def test_hostile_text_in_the_data_is_never_turned_into_elements(site):
     page = render(site)
     assert page.scripts == 1  # only the page's own script tag
     assert page.images == 0
+
+
+
+@needs_chrome
+def test_after_a_file_error_a_reload_cannot_pass_for_a_current_report(broken_site, run):
+    page = render(broken_site)
+    banner = page.words("input-warning")
+    assert not page.is_hidden("input-warning")
+    assert "notices_sent.csv" in banner
+    assert "last good report" in banner
+    assert "Data loaded from files" in page.words("summary")
+    assert "disabled" in page.attrs["export-pdf"]
+    assert page.body_rows("print-report") == 0
+
+
+@needs_chrome
+def test_changed_files_are_flagged_and_export_stays_available(changed_site):
+    page = render(changed_site)
+    banner = page.words("input-warning")
+    assert "notices_sent.csv" in banner and "Run check" in banner
+    assert "disabled" not in page.attrs["export-pdf"]
+
+
+@needs_chrome
+def test_matching_files_show_no_warning(site):
+    page = render(site)
+    assert page.is_hidden("input-warning")
+    assert page.words("input-warning") == ""

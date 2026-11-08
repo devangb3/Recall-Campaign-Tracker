@@ -120,6 +120,7 @@ button.secondary { background: #fff; color: var(--accent); border: 1px solid var
 .actions { display: flex; gap: 10px; }
 #export-pdf { background: #fff; color: var(--accent); }
 #print-report { display: none; }
+#input-warning { margin: 16px 0 0; padding: 14px 18px; border-radius: 12px; border: 1px solid #e9c46a; border-left: 5px solid #c98a0a; background: var(--repair-bg); color: #5c3d00; font-weight: 600; }
 
 /* Export dialog */
 #export-dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; max-width: 520px; width: calc(100% - 32px); box-shadow: 0 20px 50px rgba(23,32,51,.25); color: var(--ink); }
@@ -170,6 +171,7 @@ button.secondary { background: #fff; color: var(--accent); border: 1px solid var
   .print-section.tone-history h2 { border-left-color: #8896ab; }
   .print-section h3 { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); break-after: avoid; }
   .print-note { margin: 0 0 6px; color: var(--muted); font-size: 10.5px; }
+  .print-warning { margin: 10px 0 0; padding: 8px 12px; border: 1px solid #c98a0a; border-left: 5px solid #c98a0a; background: var(--repair-bg); color: #5c3d00; font-weight: 700; border-radius: 6px; }
   .print-omitted { margin-top: 20px; padding-top: 8px; border-top: 1px dashed #c9d1de; color: var(--muted); font-size: 10.5px; }
 
   .table-wrap { max-height: none; overflow: visible; box-shadow: none; border-radius: 6px; }

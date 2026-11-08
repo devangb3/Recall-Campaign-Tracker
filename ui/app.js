@@ -108,6 +108,8 @@ function clearMessage() {
 // A failed load shows only the error. No findings, empty or old, stay on screen.
 function showError(text) {
   current = null;
+  clearPrintCopy();
+  $("input-warning").hidden = true;
   $("export-pdf").disabled = true;
   $("report").hidden = true;
   $("detail").hidden = true;
@@ -117,6 +119,8 @@ function showError(text) {
 
 function showNoCheckYet() {
   current = null;
+  clearPrintCopy();
+  $("input-warning").hidden = true;
   $("export-pdf").disabled = true;
   $("report").hidden = true;
   $("detail").hidden = true;
@@ -150,11 +154,36 @@ function isoDates(text) {
   });
 }
 
+// The print-only copy is built when "Export PDF" is chosen. Throw it away
+// whenever the screen changes, so Ctrl+P can never print an earlier export
+// after an error or on newer data.
+function clearPrintCopy() {
+  $("print-report").replaceChildren();
+}
+
+// Whether the CSV files still match the loaded data (from the API). Reload
+// and the day-limit Apply reuse loaded data and never read the files, so
+// after a file error the last good report comes back. Say so, and do not let
+// it be exported as if it were current.
+function filesNote(inputCheck) {
+  if (!inputCheck || inputCheck.state === "ok") return null;
+  if (inputCheck.state === "unusable") {
+    return `${inputCheck.message} This is the last good report; nothing has been checked again. ` +
+      "Fix the files, then choose \u201cRun check\u201d.";
+  }
+  return `${inputCheck.message} This report is from the earlier data. Choose \u201cRun check\u201d to load the new files.`;
+}
+
 function render(result) {
   const report = result.report;
   clearMessage();
   current = result;
-  $("export-pdf").disabled = false;
+  clearPrintCopy();
+  const note = filesNote(result.input_check);
+  $("input-warning").textContent = note === null ? "" : note;
+  $("input-warning").hidden = note === null;
+  // An unreadable file means a new check would stop; no PDF of old data then.
+  $("export-pdf").disabled = result.input_check !== undefined && result.input_check.state === "unusable";
   $("day-limit").value = report.day_limit;
   $("summary").textContent =
     `Data loaded from files ${loadedText(result.loaded_at)} · check date ${report.check_date} · ` +
@@ -474,6 +503,8 @@ function buildPrintReport(result, runs, choice) {
   });
   cover.appendChild(meta);
   root.appendChild(cover);
+  const note = filesNote(result.input_check);
+  if (note !== null) root.appendChild(el("p", note, "print-warning"));
 
   // The numbers that matter, big. Notification and repair carry equal weight.
   const counts = { notification: 0, repair: 0 };
@@ -572,6 +603,10 @@ async function exportPdf() {
     return;
   }
   $("export-dialog").close();
+  if (current.input_check && current.input_check.state === "unusable") {
+    showMessage("The input files cannot be read, so this report is not exported. Fix the files and run a check.", true);
+    return;
+  }
   const button = $("export-pdf");
   button.disabled = true;
   try {
@@ -587,7 +622,7 @@ async function exportPdf() {
     window.addEventListener("afterprint", () => { document.title = title; }, { once: true });
     window.print();
   } finally {
-    button.disabled = current === null;
+    button.disabled = current === null || (current.input_check && current.input_check.state === "unusable");
   }
 }
 

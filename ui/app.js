@@ -120,13 +120,21 @@ function showNoCheckYet() {
   showMessage("No check has been run yet. Choose “Run check” to load the three CSV files.", false);
 }
 
+// When the CSV files were last read. Reload and Apply reuse that data, so
+// the header must say how old it is (the files are not re-read on those).
+function loadedText(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "at an unknown time" : `on ${d.toLocaleString()}`;
+}
+
 function render(result) {
   const report = result.report;
   clearMessage();
   current = result;
   $("day-limit").value = report.day_limit;
   $("summary").textContent =
-    `Check date ${report.check_date} · run ${result.run_id} · repair limit ${report.day_limit} days`;
+    `Data loaded from files ${loadedText(result.loaded_at)} · check date ${report.check_date} · ` +
+    `run ${result.run_id} · repair limit ${report.day_limit} days`;
 
   const counts = { notification: 0, repair: 0 };
   report.findings.forEach((f) => { counts[f.kind] = (counts[f.kind] || 0) + 1; });

@@ -38,6 +38,22 @@ def test_check_returns_a_json_report_with_separate_business_and_data_issues(app)
     assert app.request("GET", "/api/report") == (200, result)
 
 
+def test_runs_report_when_their_data_was_loaded_and_reuse_keeps_that_time(app):
+    first = checked(app)
+    loaded = first["loaded_at"]
+    assert loaded.endswith("+00:00")
+    # Reload and Apply reuse loaded data, so the load time must not move.
+    assert app.request("GET", "/api/report")[1]["loaded_at"] == loaded
+    status, changed = app.request("POST", "/api/day-limit", {"day_limit": 61})
+    assert status == 201
+    assert changed["run_id"] == 2
+    assert changed["loaded_at"] == loaded
+    # A file error afterwards changes nothing: the old time is still shown.
+    (app.raw_dir / "notices_sent.csv").unlink()
+    assert app.request("POST", "/api/checks", {})[0] == 422
+    assert app.request("GET", "/api/report")[1]["loaded_at"] == loaded
+
+
 def test_health_and_default_settings_do_not_create_a_database(app):
     assert app.request("GET", "/healthz") == (200, {"status": "ok"})
     assert app.request("GET", "/api/settings") == (200, {"day_limit": 60})

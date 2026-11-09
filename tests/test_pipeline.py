@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import AS_OF
+from conftest import AS_OF, write_master_data
 from recall_tracker import generate, pipeline
 from recall_tracker.contract import (
     ContractError, Decision, DecisionStatus, FindingKind, to_dict)
@@ -69,6 +69,7 @@ def boundary_raw(tmp_path):
             writer = csv.writer(handle)
             writer.writerow(header)
             writer.writerows(values)
+    write_master_data(raw, [r for _, values in rows.values() for r in values])
     return raw
 
 

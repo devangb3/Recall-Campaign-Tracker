@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import ingest
 from .checks import check_notifications, check_repairs
+from .eligibility import check_unaffected_repairs
 from .contract import (
     DEFAULT_DAY_LIMIT, Decision, Finding, FindingKind, build_report, history_row,
 )
@@ -31,7 +32,7 @@ class PipelineError(ValueError):
 def _transaction(db_path: Path | str, *, create: bool = False):
     path = Path(db_path)
     if not create and not path.is_file():
-        raise PipelineError("No recall database exists; load the three CSVs first.")
+        raise PipelineError("No recall database exists; load the five CSVs first.")
     if create:
         path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, isolation_level=None, timeout=30)
@@ -52,7 +53,7 @@ def _transaction(db_path: Path | str, *, create: bool = False):
 def _read(db_path: Path | str):
     path = Path(db_path)
     if not path.is_file():
-        raise PipelineError("No recall database exists; load the three CSVs first.")
+        raise PipelineError("No recall database exists; load the five CSVs first.")
     con = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         # One snapshot for the run, history and decisions even while another
@@ -114,7 +115,8 @@ def _save_check(con: sqlite3.Connection, snapshot: IngestSnapshot,
     business = tuple(by_pair[(pair.vin, pair.campaign_id)]
                      for pair in snapshot.affected
                      if (pair.vin, pair.campaign_id) in by_pair)
-    findings = business + _quality_findings(snapshot, check_date)
+    findings = (business + _quality_findings(snapshot, check_date)
+                + check_unaffected_repairs(snapshot.facts, check_date))
     report = build_report(
         check_date, snapshot.facts, findings,
         decisions=store.decisions(),
@@ -127,7 +129,7 @@ def _save_check(con: sqlite3.Connection, snapshot: IngestSnapshot,
 def run_check(raw_dir: Path | str, db_path: Path | str, *,
               check_date: date | None = None,
               day_limit: int | None = None) -> SavedRun:
-    """Load all three CSVs, check their accepted rows and save one whole run.
+    """Load all five CSVs, check their accepted rows and save one whole run.
 
     Unusable input stops before a database is opened. An unexpected error
     rolls back the ingest, settings and run together; no partial result is
@@ -234,7 +236,7 @@ def current_report(db_path: Path | str) -> SavedRun:
         original = latest.report
         report = build_report(
             original.check_date, tuple(view.facts for view in original.vehicles),
-            original.findings + original.data_quality,
+            original.findings + original.data_quality + original.flagged_repairs,
             decisions=store.decisions(), history=store.history(),
             data_issues=original.data_issues, day_limit=original.day_limit)
         return replace(latest, report=report)

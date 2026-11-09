@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import AS_OF, read_csv, write_dataset
+from conftest import AS_OF, read_csv, write_dataset, write_master_data
 from recall_tracker import ingest
 from recall_tracker.contract import AffectedVehicle, Facts, NoticeSent, RepairDone
 from recall_tracker.ingest import (AFFECTED_FILE, FILES, NOTICES_FILE,
@@ -31,6 +31,8 @@ HEADERS = {
     AFFECTED_FILE: "vin,campaign_id",
     NOTICES_FILE: "vin,campaign_id,notice_date",
     REPAIRS_FILE: "vin,campaign_id,repair_date,tech_note",
+    "vehicles.csv": "vin,model,build_date",
+    "campaigns.csv": "campaign_id,model,start_date,end_date",
 }
 
 
@@ -44,6 +46,7 @@ def make_raw(folder: Path, affected=(), notices=(), repairs=(),
         with open(folder / name, "w", newline="", encoding="utf-8") as f:
             f.write(headers[name] + "\n")
             csv.writer(f, lineterminator="\n").writerows(rows)
+    write_master_data(folder, list(affected) + list(notices) + list(repairs))
     return folder
 
 
@@ -561,9 +564,11 @@ def test_notice_for_unaffected_vehicle_is_kept(tmp_path):
     assert len(run(raw).clean[NOTICES_FILE]) == 1
 
 
-def test_repair_for_unaffected_vehicle_is_flagged(tmp_path):
+def test_repair_absent_from_supplied_list_is_flagged_and_kept(tmp_path):
     raw = make_raw(tmp_path / "raw", repairs=[[V1, C1, "01/01/2026", ""]])
-    assert codes(run(raw)) == ["NOT_IN_AFFECTED"]
+    result = run(raw)
+    assert codes(result) == ["NOT_IN_AFFECTED"]
+    assert len(result.clean[REPAIRS_FILE]) == 1
 
 
 def test_wrong_campaign_for_affected_vin_is_not_in_affected(tmp_path):

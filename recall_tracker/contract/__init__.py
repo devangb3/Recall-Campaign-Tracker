@@ -1,7 +1,8 @@
 """Shared records the checks emit and the report reads.
 
 A finding names one vehicle and campaign, the kind, the reason, the check
-date, and the facts used. Kind is notification, repair, or data quality.
+date, and the facts used. Kind is notification, repair, data quality, or
+unaffected repair. Unaffected repairs stay in ``flagged_repairs``.
 Data-quality findings stay on their own list. Notification and repair are
 equal: the payload keeps the order the checks emitted and has no rank.
 
@@ -25,11 +26,13 @@ keeps the earlier ones. The latest is current.
 A check-history row is the check date, kind, and reason for one vin and
 campaign_id, plus the day limit used for that check.
 
-Facts use only these columns:
+Facts use these columns:
 
 * affected vehicles: vin, campaign_id
 * notices sent: vin, campaign_id, notice_date
 * repairs done: vin, campaign_id, repair_date
+* vehicles: vin, model, build_date
+* campaigns: campaign_id, model, start_date, end_date (inclusive build range)
 
 A notice row with a bad date is a data-issue record. The pair was in the
 notices file, so it is not a notification finding.
@@ -45,7 +48,7 @@ from .days import (
     repair_date_used, repair_outside_limit)
 from .decision import (
     Decision, DecisionStatus, append_decision, current_decision, decisions_for)
-from .facts import AffectedVehicle, Facts, NoticeSent, RepairDone
+from .facts import AffectedVehicle, Campaign, Facts, NoticeSent, RepairDone, Vehicle
 from .finding import Finding, FindingKind
 from .history import CheckHistoryRow, history_row
 from .report import ReportPayload, VehicleView, build_report
@@ -58,6 +61,7 @@ __all__ = [
     "DEFAULT_DAY_LIMIT",
     "AffectedDict",
     "AffectedVehicle",
+    "Campaign",
     "CheckHistoryRow",
     "ContractError",
     "DataIssue",
@@ -78,6 +82,7 @@ __all__ = [
     "ReportDict",
     "ReportPayload",
     "VehicleDict",
+    "Vehicle",
     "VehicleView",
     "append_decision",
     "build_report",

@@ -301,14 +301,14 @@ def test_screen_payload_uses_the_contract_keys_and_drops_excluded_ones():
     dumped = to_dict(payload)
     json.dumps(dumped)
     assert list(dumped) == [
-        "check_date", "day_limit", "findings", "data_quality", "data_issues",
+        "check_date", "day_limit", "findings", "flagged_repairs", "data_quality", "data_issues",
         "decisions", "history", "vehicles"]
     assert list(dumped["findings"][0]) == [
         "vin", "campaign_id", "kind", "reason", "check_date", "facts"]
     assert dumped["findings"][0]["kind"] == "repair"
     assert dumped["data_quality"][0]["kind"] == "data quality"
     assert list(dumped["findings"][0]["facts"]) == [
-        "affected", "notices", "repairs"]
+        "affected", "notices", "repairs", "vehicle", "campaign"]
     assert list(dumped["findings"][0]["facts"]["repairs"][0]) == [
         "vin", "campaign_id", "repair_date"]
     assert list(dumped["vehicles"][0]) == [

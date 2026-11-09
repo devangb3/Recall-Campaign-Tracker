@@ -1,16 +1,17 @@
-"""Read, check and load the three dealership CSVs into recall.db.
+"""Read, check and load the five dealership CSVs into recall.db.
 
 Order of work:
 
-1. Read all three files. If any file is missing, cannot be read, is
+1. Read all five files. If any file is missing, cannot be read, is
    empty, or lacks a required column, stop straight away with a clear
    error naming the file and the problem. Nothing is written and
    recall.db is left as it was (client decision, 4 Nov 2026).
 2. Check every row (validate). Safe fixes come from normalize.py. A row
    with a bad or blank value is quarantined with an issue code and a
    reason. Then, on the rows that are left: repeated rows are dropped,
-   and date conflicts, repairs before the notice, and notices or repairs
-   for vehicles not in the affected file are flagged but kept.
+   and date conflicts, repairs before the notice, and notices or repairs for
+   vehicles absent from the affected file are flagged but kept. Vehicle/campaign
+   masters also supply the independent unaffected-repair eligibility check.
 3. Load everything in one SQLite transaction (load). Before commit, the
    row balance must hold for every file:
    raw rows = clean rows + quarantined rows + dropped duplicates.
@@ -38,13 +39,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .normalize import (normalize_campaign, normalize_header, normalize_note,
-                        normalize_vin, parse_date)
+from .normalize import (Result, normalize_campaign, normalize_header,
+                        normalize_model, normalize_note, normalize_vin, parse_date)
 
 AFFECTED_FILE = "affected_vehicles.csv"
 NOTICES_FILE = "notices_sent.csv"
 REPAIRS_FILE = "repairs_done.csv"
-FILES = (AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE)
+VEHICLES_FILE = "vehicles.csv"
+CAMPAIGNS_FILE = "campaigns.csv"
+MASTER_FILES = (VEHICLES_FILE, CAMPAIGNS_FILE)
+FILES = (AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE, *MASTER_FILES)
 
 # Columns each file must have. tech_note is optional: if the column is
 # missing, every note is stored as empty text.
@@ -52,6 +56,8 @@ REQUIRED = {
     AFFECTED_FILE: ("vin", "campaign_id"),
     NOTICES_FILE: ("vin", "campaign_id", "notice_date"),
     REPAIRS_FILE: ("vin", "campaign_id", "repair_date"),
+    VEHICLES_FILE: ("vin", "model", "build_date"),
+    CAMPAIGNS_FILE: ("campaign_id", "model", "start_date", "end_date"),
 }
 OPTIONAL = {REPAIRS_FILE: ("tech_note",)}
 DATE_COLUMN = {NOTICES_FILE: "notice_date", REPAIRS_FILE: "repair_date"}
@@ -68,6 +74,9 @@ ACTION_FOR = {
     "DATE_CONFLICT": "kept",
     "REPAIR_BEFORE_NOTICE": "kept",
     "NOT_IN_AFFECTED": "kept",
+    "BAD_DATE_RANGE": "quarantined",
+    "CONFLICTING_MASTER": "quarantined",
+    "ELIGIBILITY_UNAVAILABLE": "kept",
 }
 
 
@@ -108,7 +117,7 @@ class Issue:
 
 @dataclass
 class CleanRow:
-    """One accepted row, after safe fixes. date is None for affected rows."""
+    """Accepted row. Masters carry model/build metadata instead of an event date."""
 
     file: str
     src_row: int
@@ -116,6 +125,10 @@ class CleanRow:
     campaign_id: str
     date: date | None = None
     tech_note: str | None = None
+    model: str | None = None
+    build_date: date | None = None
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 @dataclass
@@ -202,7 +215,7 @@ def read_file(raw_dir: Path, name: str) -> RawFile:
 
 
 def read_all(raw_dir: Path) -> dict[str, RawFile]:
-    """Read the three files, in order. Stop at the first unusable one."""
+    """Read the five files, in order. Stop at the first unusable one."""
     return {name: read_file(Path(raw_dir), name) for name in FILES}
 
 
@@ -224,16 +237,19 @@ def _raw_json(raw: RawFile, cells: list[str]) -> str:
 
 
 def validate(files: dict[str, RawFile], as_of: date) -> IngestResult:
-    """Check every row of the three files. Writes nothing."""
+    """Check every row of the five files. Writes nothing."""
     result = IngestResult(as_of, files)
     for name in FILES:
         _check_rows(result, files[name], as_of)
+    for name in MASTER_FILES:
+        _quarantine_master_conflicts(result, name)
     for name in FILES:
         _drop_duplicates(result, name)
     for name in DATE_COLUMN:
         _flag_date_conflicts(result, name)
     _flag_not_in_affected(result)
     _flag_repair_before_notice(result)
+    _flag_missing_eligibility(result)
     result.issues.sort(key=lambda i: (FILES.index(i.file), i.src_row,
                                       list(ACTION_FOR).index(i.issue_code)))
     return result
@@ -248,9 +264,34 @@ def _check_rows(result: IngestResult, raw: RawFile, as_of: date) -> None:
         raw_json = _raw_json(raw, cells)
         vin_raw = _cell(raw, cells, "vin")
         cid_raw = _cell(raw, cells, "campaign_id")
-        vin_res = normalize_vin(vin_raw)
-        cid_res = normalize_campaign(cid_raw)
-        checks = [("vin", vin_raw, vin_res), ("campaign_id", cid_raw, cid_res)]
+        vin_res = normalize_vin(vin_raw) if name != CAMPAIGNS_FILE else Result("")
+        cid_res = normalize_campaign(cid_raw) if name != VEHICLES_FILE else Result("")
+        checks = []
+        if name != CAMPAIGNS_FILE:
+            checks.append(("vin", vin_raw, vin_res))
+        if name != VEHICLES_FILE:
+            checks.append(("campaign_id", cid_raw, cid_res))
+        metadata = {}
+        if name in MASTER_FILES:
+            model_raw = _cell(raw, cells, "model")
+            model_res = normalize_model(model_raw)
+            checks.append(("model", model_raw, model_res))
+            metadata["model"] = model_res.value
+            for col in (("build_date",) if name == VEHICLES_FILE
+                        else ("start_date", "end_date")):
+                value = _cell(raw, cells, col)
+                # Campaign boundaries describe vehicle production, not
+                # event dates; future boundaries are allowed.
+                res = parse_date(value, col.replace("_", " ").capitalize(),
+                                 as_of if name == VEHICLES_FILE else None)
+                checks.append((col, value, res))
+                metadata[col] = res.value
+            if (name == CAMPAIGNS_FILE and metadata["start_date"] is not None
+                    and metadata["end_date"] is not None
+                    and metadata["start_date"] > metadata["end_date"]):
+                checks.append(("end_date", _cell(raw, cells, "end_date"), Result(
+                    issue_code="BAD_DATE_RANGE",
+                    reason="Campaign start date is after its end date.")))
         date_res = None
         if name in DATE_COLUMN:
             col = DATE_COLUMN[name]
@@ -263,7 +304,7 @@ def _check_rows(result: IngestResult, raw: RawFile, as_of: date) -> None:
             for col, raw_value, res in bad:
                 result.issues.append(Issue(
                     name, src_row, col, raw_value or "", res.issue_code,
-                    res.reason, raw_json, vin_res.value, cid_res.value))
+                    res.reason, raw_json, vin_res.value or None, cid_res.value or None))
             result.quarantined[name].append(
                 (src_row, raw_json, [res.issue_code for _, _, res in bad]))
             continue
@@ -272,7 +313,37 @@ def _check_rows(result: IngestResult, raw: RawFile, as_of: date) -> None:
             note = normalize_note(_cell(raw, cells, "tech_note"))
         result.clean[name].append(CleanRow(
             name, src_row, vin_res.value, cid_res.value,
-            date_res.value if date_res else None, note))
+            date_res.value if date_res else None, note, **metadata))
+
+
+def _quarantine_master_conflicts(result: IngestResult, name: str) -> None:
+    """Block ambiguous identifiers, including malformed duplicate records."""
+    identifier = "vin" if name == VEHICLES_FILE else "campaign_id"
+    normalize = normalize_vin if name == VEHICLES_FILE else normalize_campaign
+    groups = {}
+    for row in result.clean[name]:
+        groups.setdefault(getattr(row, identifier), []).append(row)
+    invalid = set()
+    raw = result.files[name]
+    quarantined = {n for n, _, _ in result.quarantined[name]}
+    for src_row, cells in raw.rows:
+        if src_row in quarantined:
+            key = normalize(_cell(raw, cells, identifier))
+            if key.ok:
+                invalid.add(key.value)
+    keep = []
+    for key, rows in groups.items():
+        values = {(r.model, r.build_date, r.start_date, r.end_date) for r in rows}
+        if len(values) > 1 or key in invalid:
+            for row in rows:
+                _row_issue(result, row, "CONFLICTING_MASTER", identifier,
+                            f"Conflicting records for {identifier} {key}; "
+                            "campaign eligibility cannot be determined.")
+                result.quarantined[name].append((
+                    row.src_row, _raw_row_text(result, row), ["CONFLICTING_MASTER"]))
+        else:
+            keep.extend(rows)
+    result.clean[name] = sorted(keep, key=lambda r: r.src_row)
 
 
 def _raw_row_text(result: IngestResult, row: CleanRow) -> str:
@@ -287,12 +358,12 @@ def _raw_cell(result: IngestResult, row: CleanRow, col: str) -> str:
     return _cell(raw, cells, col) or ""
 
 
-def _kept_issue(result, row: CleanRow, code: str, column: str,
+def _row_issue(result, row: CleanRow, code: str, column: str,
                 reason: str) -> None:
     result.issues.append(Issue(
         row.file, row.src_row, column,
         _raw_cell(result, row, column) if column else "", code, reason,
-        _raw_row_text(result, row), row.vin, row.campaign_id))
+        _raw_row_text(result, row), row.vin or None, row.campaign_id or None))
 
 
 def _drop_duplicates(result: IngestResult, name: str) -> None:
@@ -300,7 +371,8 @@ def _drop_duplicates(result: IngestResult, name: str) -> None:
 
     The tech_note is not compared, so two repairs on the same day with
     different notes count as one repair (the contract allows one repair
-    per date for a vehicle).
+    per date for a vehicle). Master duplicates use their identifier after
+    conflicting model/date records have already been quarantined.
     """
     first: dict[tuple, CleanRow] = {}
     kept = []
@@ -311,8 +383,9 @@ def _drop_duplicates(result: IngestResult, name: str) -> None:
             same = (_raw_row_text(result, row)
                     == _raw_row_text(result, earlier))
             what = ("an exact copy of" if same else
+                    "the same normalized master record as" if name in MASTER_FILES else
                     "the same vehicle, campaign and date as")
-            _kept_issue(result, row, "DUPLICATE_ROW", "",
+            _row_issue(result, row, "DUPLICATE_ROW", "",
                         f"Row is {what} row {earlier.src_row}.")
             result.dropped[name] += 1
         else:
@@ -329,7 +402,7 @@ def _flag_date_conflicts(result: IngestResult, name: str) -> None:
         earlier = first.setdefault(pair, row)
         if earlier.date != row.date:
             label = DATE_LABEL[name].split()[0]
-            _kept_issue(
+            _row_issue(
                 result, row, "DATE_CONFLICT", col,
                 f"{label} dates conflict for this vehicle and campaign: "
                 f"{_raw_cell(result, earlier, col).strip()} (row "
@@ -342,10 +415,25 @@ def _flag_not_in_affected(result: IngestResult) -> None:
     for name in DATE_COLUMN:
         for row in result.clean[name]:
             if (row.vin, row.campaign_id) not in affected:
-                _kept_issue(
+                _row_issue(
                     result, row, "NOT_IN_AFFECTED", "",
                     f"VIN {row.vin} is not listed as affected by campaign "
                     f"{row.campaign_id}.")
+
+
+def _flag_missing_eligibility(result: IngestResult) -> None:
+    vehicles = {r.vin for r in result.clean[VEHICLES_FILE]}
+    campaigns = {r.campaign_id for r in result.clean[CAMPAIGNS_FILE]}
+    for row in result.clean[REPAIRS_FILE]:
+        missing = []
+        if row.vin not in vehicles:
+            missing.append(f"vehicle {row.vin} in vehicles.csv")
+        if row.campaign_id not in campaigns:
+            missing.append(f"campaign {row.campaign_id} in campaigns.csv")
+        if missing:
+            _row_issue(result, row, "ELIGIBILITY_UNAVAILABLE", "",
+                        "Cannot determine campaign eligibility: no unambiguous "
+                        "valid record for " + " and ".join(missing) + ".")
 
 
 def _flag_repair_before_notice(result: IngestResult) -> None:
@@ -357,7 +445,7 @@ def _flag_repair_before_notice(result: IngestResult) -> None:
     for row in result.clean[REPAIRS_FILE]:
         notice = earliest.get((row.vin, row.campaign_id))
         if notice and row.date < notice.date:
-            _kept_issue(
+            _row_issue(
                 result, row, "REPAIR_BEFORE_NOTICE", "repair_date",
                 f"Repair date {_raw_cell(result, row, 'repair_date').strip()}"
                 f" is before the first notice date "
@@ -406,6 +494,28 @@ CREATE TABLE IF NOT EXISTS repairs_done (
     tech_note   TEXT NOT NULL,
     PRIMARY KEY (ingest_id, src_file, src_row)
 );
+CREATE TABLE IF NOT EXISTS vehicles (
+    ingest_id INTEGER NOT NULL REFERENCES ingests(ingest_id),
+    src_file TEXT NOT NULL,
+    src_row INTEGER NOT NULL,
+    vin TEXT NOT NULL,
+    model TEXT NOT NULL,
+    build_date TEXT NOT NULL,
+    UNIQUE (ingest_id, vin),
+    PRIMARY KEY (ingest_id, src_file, src_row)
+);
+CREATE TABLE IF NOT EXISTS campaigns (
+    ingest_id INTEGER NOT NULL REFERENCES ingests(ingest_id),
+    src_file TEXT NOT NULL,
+    src_row INTEGER NOT NULL,
+    campaign_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    CHECK (start_date <= end_date),
+    UNIQUE (ingest_id, campaign_id),
+    PRIMARY KEY (ingest_id, src_file, src_row)
+);
 CREATE TABLE IF NOT EXISTS data_issues (
     issue_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     ingest_id   INTEGER NOT NULL REFERENCES ingests(ingest_id),
@@ -431,7 +541,7 @@ CREATE TABLE IF NOT EXISTS quarantine (
 """
 
 CURRENT_TABLES = ("affected_vehicles", "notices_sent", "repairs_done",
-                  "data_issues", "quarantine")
+                  "data_issues", "quarantine", "vehicles", "campaigns")
 VIEWS = "\n".join(
     f"CREATE VIEW IF NOT EXISTS cur_{t} AS SELECT * FROM {t} WHERE ingest_id "
     f"= (SELECT MAX(ingest_id) FROM ingests WHERE status = 'complete');"
@@ -445,6 +555,11 @@ def _now() -> str:
 def write(con: sqlite3.Connection, result: IngestResult,
           started_at: str) -> int:
     """Insert one ingest. The caller owns the transaction."""
+    from .migrations import expand_check
+    issue_schema = next(s for s in SCHEMA.split(";")
+                        if "CREATE TABLE IF NOT EXISTS data_issues" in s)
+    expand_check(con, "data_issues", "ELIGIBILITY_UNAVAILABLE", issue_schema,
+                 current_view=True)
     for stmt in (SCHEMA + VIEWS).split(";"):
         if stmt.strip():
             con.execute(stmt)
@@ -468,6 +583,15 @@ def write(con: sqlite3.Connection, result: IngestResult,
         "INSERT INTO repairs_done VALUES (?, ?, ?, ?, ?, ?, ?)",
         [(ingest_id, r.file, r.src_row, r.vin, r.campaign_id,
           r.date.isoformat(), r.tech_note) for r in result.clean[REPAIRS_FILE]])
+    con.executemany(
+        "INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)",
+        [(ingest_id, r.file, r.src_row, r.vin, r.model, r.build_date.isoformat())
+         for r in result.clean[VEHICLES_FILE]])
+    con.executemany(
+        "INSERT INTO campaigns VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(ingest_id, r.file, r.src_row, r.campaign_id, r.model,
+          r.start_date.isoformat(), r.end_date.isoformat())
+         for r in result.clean[CAMPAIGNS_FILE]])
     con.executemany(
         'INSERT INTO data_issues (ingest_id, file, src_row, "column", '
         "raw_value, issue_code, action, reason, vin, campaign_id, raw_row) "
@@ -507,7 +631,7 @@ def load_prepared(con: sqlite3.Connection, result: IngestResult,
 
 
 def load(raw_dir: Path, db_path: Path, as_of: date | None = None) -> int:
-    """Read, check and load the three files. Return the new ingest_id.
+    """Read, check and load the five files. Return the new ingest_id.
 
     Raises IngestStopError (a file is unusable) before touching the
     database, so recall.db is not even created. Raises RowBalanceError or
@@ -532,7 +656,8 @@ def load(raw_dir: Path, db_path: Path, as_of: date | None = None) -> int:
 def _check_db_balance(con, ingest_id: int, result: IngestResult) -> None:
     """Count what actually landed in the database for this ingest."""
     tables = {AFFECTED_FILE: "affected_vehicles",
-              NOTICES_FILE: "notices_sent", REPAIRS_FILE: "repairs_done"}
+              NOTICES_FILE: "notices_sent", REPAIRS_FILE: "repairs_done",
+              VEHICLES_FILE: "vehicles", CAMPAIGNS_FILE: "campaigns"}
     for name, table in tables.items():
         clean = con.execute(f"SELECT COUNT(*) FROM {table} WHERE ingest_id=?",
                             (ingest_id,)).fetchone()[0]

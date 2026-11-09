@@ -108,7 +108,7 @@ def find_issues(files: dict, as_of: date = AS_OF):
     """
     issues = set()
     clean = {}
-    for name in gen.COLUMNS:
+    for name in (gen.AFFECTED_FILE, gen.NOTICES_FILE, gen.REPAIRS_FILE):
         clean[name] = []
         for num, row in enumerate(files[name], start=2):
             codes = []
@@ -135,7 +135,7 @@ def find_issues(files: dict, as_of: date = AS_OF):
                 clean[name].append((vin, cid, d, num))
 
     # Exact duplicates, then date conflicts, within each file.
-    for name in gen.COLUMNS:
+    for name in (gen.AFFECTED_FILE, gen.NOTICES_FILE, gen.REPAIRS_FILE):
         seen, kept = set(), []
         for rec in clean[name]:
             key = rec[:3]
@@ -164,3 +164,19 @@ def find_issues(files: dict, as_of: date = AS_OF):
         if (v, c) in earliest and d < earliest[(v, c)]:
             issues.add((gen.REPAIRS_FILE, num, "REPAIR_BEFORE_NOTICE", "kept"))
     return issues, clean
+
+
+def write_master_data(folder, rows):
+    """Complete legacy test scenarios with independent, eligible masters."""
+    vins = sorted({v for row in rows if row and (v := ref_vin(row[0]))})
+    campaigns = sorted({c for row in rows if len(row) > 1 and (c := ref_campaign(row[1]))})
+    for name, header, values in (
+        ("vehicles.csv", ["vin", "model", "build_date"],
+         [[v, "SEDAN", "2024-01-01"] for v in vins]),
+        ("campaigns.csv", ["campaign_id", "model", "start_date", "end_date"],
+         [[c, "SEDAN", "2020-01-01", "2030-12-31"] for c in campaigns]),
+    ):
+        with (folder / name).open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            writer.writerows(values)

@@ -107,6 +107,56 @@ def test_script_has_valid_syntax():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("action", ["runCheck", "dayLimit"])
+@pytest.mark.parametrize("has_report", [False, True])
+def test_successful_check_actions_display_the_returned_report(
+        small_dir, tmp_path, action, has_report):
+    """Exercise the UI reducer with the real API's HTTP 201 response."""
+    app = Application(tmp_path / "recall.db", small_dir)
+    status, previous = app.request(
+        "POST", "/api/checks", {"check_date": "2026-11-01"})
+    assert status == 201
+    path = "/api/checks" if action == "runCheck" else "/api/day-limit"
+    body = {"check_date": "2026-11-01", "day_limit": 61}
+    status, current = app.request("POST", path, body)
+    assert status == 201
+    # Leave the browser bootstrap out so the real reducer can run in Node.
+    source, count = re.subn(
+        r"\nmountWorkspace\(document, \{ request: api \}\);\s*$", "", APP_JS)
+    assert count == 1
+    scenario = r"""
+const assert = require("node:assert/strict");
+const input = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+let state = initialState("#/history");
+if (input.hasReport) {
+  state = reduce(state, {
+    type: "report", epoch: state.epoch, status: 200, data: input.previous,
+  }).state;
+}
+const pending = reduce(state, { type: input.action, dayLimit: 61 });
+assert.equal(pending.effect.path, input.path);
+assert.equal(pending.state.busy, true);
+const result = reduce(pending.state, {
+  type: "report", epoch: pending.effect.epoch, status: input.status, data: input.current,
+});
+assert.equal(result.state.phase, "ready");
+assert.equal(result.state.message, null);
+assert.equal(result.state.busy, false);
+assert.equal(result.state.index.runId, input.current.run_id);
+assert.equal(result.state.index.dayLimit, 61);
+assert.equal(result.state.cursor.lensId, "history");
+assert.deepEqual(result.state.index.findings, input.current.report.findings);
+"""
+    result = subprocess.run(
+        ["node", "-e", source + scenario],
+        input=json.dumps({"action": action, "hasReport": has_report,
+                          "path": path, "status": status,
+                          "previous": previous, "current": current}),
+        capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_no_control_can_contact_owners_or_edit_sources():
     """The only requests the UI makes are the documented coordinator actions."""
     sent = set(re.findall(r'api\("(?:POST|PUT|PATCH|DELETE)",\s*"([^"]+)"', APP_JS))
@@ -282,8 +332,8 @@ def test_flags_page_lists_what_the_report_holds(site, run):
     assert f"run {run['run_id']}" in header
     assert f"repair limit {report['day_limit']} days" in header
     assert page.body_rows("findings") == len(report["findings"])
-    assert page.body_rows("data-issues") == len(report["data_issues"])
-    assert page.body_rows("data-quality") == len(report["data_quality"])
+    assert page.is_hidden("data-problems")
+    assert page.is_hidden("detail")
     stats = page.words("stats")
     kinds = [f["kind"] for f in report["findings"]]
     assert f"{kinds.count('notification')} Notification findings" in stats
@@ -305,6 +355,26 @@ def test_a_new_database_says_no_check_has_run(empty_site):
     assert "No check has been run yet" in page.words("message")
     assert page.is_hidden("report")
     assert "disabled" in page.attrs["export-pdf"]
+
+
+@needs_chrome
+def test_data_problems_lists_issues_and_quality(site, run):
+    report = run["report"]
+    page = render(site, "#/data-problems")
+    assert not page.is_hidden("data-problems")
+    assert page.is_hidden("report")
+    assert page.body_rows("data-issues") == len(report["data_issues"])
+    assert page.body_rows("data-quality") == len(report["data_quality"])
+
+
+@needs_chrome
+def test_open_vehicle_stays_beside_the_findings_list(site, run):
+    view = next(v for v in run["report"]["vehicles"] if v["vin"] and v["campaign_id"])
+    page = render(site, vehicle_route(view))
+    assert not page.is_hidden("detail")
+    assert not page.is_hidden("report")
+    assert view["vin"] in page.words("detail")
+    assert page.body_rows("findings") == len(run["report"]["findings"])
 
 
 @needs_chrome
@@ -371,7 +441,7 @@ def test_dates_in_reasons_show_as_iso_and_invalid_ones_stay(site, run):
     iso, us = real_dates(flag["reason"])[0]
     text = render(site, f"#/vehicle/{flag['vin']}/{flag['campaign_id']}").words("detail")
     assert iso in text and us not in text
-    assert iso in render(site).words("data-quality")
+    assert iso in render(site, "#/data-problems").words("data-quality")
 
     # A value that is not a real date is the problem, so it stays as written.
     known = {(v["vin"], v["campaign_id"]) for v in report["vehicles"]}

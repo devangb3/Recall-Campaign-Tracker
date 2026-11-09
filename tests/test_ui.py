@@ -107,6 +107,56 @@ def test_script_has_valid_syntax():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("action", ["runCheck", "dayLimit"])
+@pytest.mark.parametrize("has_report", [False, True])
+def test_successful_check_actions_display_the_returned_report(
+        small_dir, tmp_path, action, has_report):
+    """Exercise the UI reducer with the real API's HTTP 201 response."""
+    app = Application(tmp_path / "recall.db", small_dir)
+    status, previous = app.request(
+        "POST", "/api/checks", {"check_date": "2026-11-01"})
+    assert status == 201
+    path = "/api/checks" if action == "runCheck" else "/api/day-limit"
+    body = {"check_date": "2026-11-01", "day_limit": 61}
+    status, current = app.request("POST", path, body)
+    assert status == 201
+    # Leave the browser bootstrap out so the real reducer can run in Node.
+    source, count = re.subn(
+        r"\nmountWorkspace\(document, \{ request: api \}\);\s*$", "", APP_JS)
+    assert count == 1
+    scenario = r"""
+const assert = require("node:assert/strict");
+const input = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+let state = initialState("#/history");
+if (input.hasReport) {
+  state = reduce(state, {
+    type: "report", epoch: state.epoch, status: 200, data: input.previous,
+  }).state;
+}
+const pending = reduce(state, { type: input.action, dayLimit: 61 });
+assert.equal(pending.effect.path, input.path);
+assert.equal(pending.state.busy, true);
+const result = reduce(pending.state, {
+  type: "report", epoch: pending.effect.epoch, status: input.status, data: input.current,
+});
+assert.equal(result.state.phase, "ready");
+assert.equal(result.state.message, null);
+assert.equal(result.state.busy, false);
+assert.equal(result.state.index.runId, input.current.run_id);
+assert.equal(result.state.index.dayLimit, 61);
+assert.equal(result.state.cursor.lensId, "history");
+assert.deepEqual(result.state.index.findings, input.current.report.findings);
+"""
+    result = subprocess.run(
+        ["node", "-e", source + scenario],
+        input=json.dumps({"action": action, "hasReport": has_report,
+                          "path": path, "status": status,
+                          "previous": previous, "current": current}),
+        capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_no_control_can_contact_owners_or_edit_sources():
     """The only requests the UI makes are the documented coordinator actions."""
     sent = set(re.findall(r'api\("(?:POST|PUT|PATCH|DELETE)",\s*"([^"]+)"', APP_JS))

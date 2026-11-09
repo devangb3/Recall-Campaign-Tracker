@@ -726,7 +726,7 @@ function reduce(state, command) {
   }
   case "report": {
     if (command.epoch !== state.epoch) return { state: state, effect: null };
-    if (command.status === 200) {
+    if (command.status === 200 || command.status === 201) {
       let index;
       try {
         index = parseReport(command.data);

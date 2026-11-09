@@ -72,8 +72,18 @@ def test_model_and_inclusive_build_range_define_flag(raw, tmp_path, model, built
     original = {p.name: p.read_bytes() for p in raw.iterdir()}
     run = pipeline.run_check(raw, tmp_path / "recall.db", check_date=AS_OF)
     assert bool(run.report.flagged_repairs) is flag
-    assert not run.report.data_issues
-    assert not run.report.data_quality
+    expected_codes = [] if listed else ["NOT_IN_AFFECTED"]
+    assert [i.issue_code for i in run.report.data_issues] == expected_codes
+    assert len(run.report.data_quality) == (0 if listed else 1)
+    if not listed:
+        issue, = run.report.data_issues
+        assert (issue.file, issue.vin, issue.campaign_id, issue.action) == (
+            "repairs_done.csv", VIN, CID, "kept")
+        quality, = run.report.data_quality
+        assert quality.reason == issue.reason
+        assert quality.kind is FindingKind.DATA_QUALITY
+        assert run.report.vehicles[0].data_quality_reasons == (issue.reason,)
+    assert run.report.vehicles[0].facts.repairs
     assert all(f.kind is not FindingKind.UNAFFECTED_REPAIR for f in run.report.findings)
     if flag:
         f, = run.report.flagged_repairs
@@ -145,7 +155,8 @@ def test_equivalent_master_duplicates_are_safe(raw, tmp_path, file, rows):
     write(raw, file, rows)
     run = pipeline.run_check(raw, tmp_path / "r.db", check_date=AS_OF)
     assert not run.report.flagged_repairs
-    assert [i.issue_code for i in run.report.data_issues] == ["DUPLICATE_ROW"]
+    assert {i.issue_code for i in run.report.data_issues} == {
+        "DUPLICATE_ROW", "NOT_IN_AFFECTED"}
 
 
 def test_future_campaign_boundary_and_single_day_range_are_supported(raw, tmp_path):
@@ -168,7 +179,8 @@ def test_flags_are_per_vin_campaign_and_use_all_accepted_repair_dates(raw, tmp_p
     flag, = run.report.flagged_repairs
     assert flag.campaign_id == CID
     assert len(flag.facts.repairs) == 2
-    assert {i.issue_code for i in run.report.data_issues} == {"DATE_CONFLICT", "DUPLICATE_ROW"}
+    assert {i.issue_code for i in run.report.data_issues} == {
+        "DATE_CONFLICT", "DUPLICATE_ROW", "NOT_IN_AFFECTED"}
 
 
 def test_invalid_repair_is_not_evidence_of_repair(raw, tmp_path):
@@ -205,7 +217,11 @@ def test_api_exposes_separate_flags_evidence_and_history(raw, tmp_path):
     assert flag["kind"] == "unaffected repair"
     assert flag["facts"]["vehicle"]["model"] == "UTILITY"
     assert flag["facts"]["campaign"]["start_date"] == "2024-01-01"
-    assert report["data_quality"] == report["data_issues"] == []
+    issue, = report["data_issues"]
+    assert issue["issue_code"] == "NOT_IN_AFFECTED"
+    quality, = report["data_quality"]
+    assert quality["reason"] == issue["reason"]
+    assert quality["kind"] == "data quality"
     assert app.request("GET", "/api/report")[1]["report"] == report
     assert app.request("GET", "/api/history")[1]["history"][-1]["kind"] == "unaffected repair"
 
@@ -293,7 +309,8 @@ def test_legacy_database_upgrade_preserves_every_historical_record(legacy_db, ra
         for table, records in before.items():
             assert con.execute(f"SELECT * FROM {table}").fetchall()[:len(records)] == records
         assert con.execute("SELECT name FROM sqlite_master WHERE name='check_history_pair'").fetchone()
-        assert con.execute("SELECT COUNT(*) FROM cur_data_issues").fetchone() == (0,)
+        assert con.execute("SELECT issue_code FROM cur_data_issues").fetchall() == [
+            ("NOT_IN_AFFECTED",)]
     # Rechecking an old three-file ingest cannot borrow new master records.
     from recall_tracker.snapshot import read_snapshot
     with sqlite3.connect(legacy_db) as con:

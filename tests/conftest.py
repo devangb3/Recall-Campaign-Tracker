@@ -156,7 +156,7 @@ def find_issues(files: dict, as_of: date = AS_OF):
     earliest = {}
     for v, c, d, _ in clean[gen.NOTICES_FILE]:
         earliest[(v, c)] = min(d, earliest.get((v, c), d))
-    for name in (gen.NOTICES_FILE,):
+    for name in DATE_COL:
         for v, c, d, num in clean[name]:
             if (v, c) not in affected:
                 issues.add((name, num, "NOT_IN_AFFECTED", "kept"))

@@ -148,7 +148,7 @@ def test_generated_seed_locked_cases_and_normalization(seed, size, tmp_path):
             (HOSTILE_NOTE,)).fetchone() == (HOSTILE_NOTE,)
     assert all(len(v.vin) == 17 and v.vin == v.vin.upper()
                for v in run.report.vehicles)
-    assert len(run.report.data_issues) == 26
+    assert len(run.report.data_issues) == 27
     assert all(f.kind is not FindingKind.DATA_QUALITY
                for f in run.report.findings)
     assert run.report.decisions == ()

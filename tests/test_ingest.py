@@ -564,9 +564,11 @@ def test_notice_for_unaffected_vehicle_is_kept(tmp_path):
     assert len(run(raw).clean[NOTICES_FILE]) == 1
 
 
-def test_repair_absent_from_supplied_list_is_not_a_data_issue(tmp_path):
+def test_repair_absent_from_supplied_list_is_flagged_and_kept(tmp_path):
     raw = make_raw(tmp_path / "raw", repairs=[[V1, C1, "01/01/2026", ""]])
-    assert codes(run(raw)) == []
+    result = run(raw)
+    assert codes(result) == ["NOT_IN_AFFECTED"]
+    assert len(result.clean[REPAIRS_FILE]) == 1
 
 
 def test_wrong_campaign_for_affected_vin_is_not_in_affected(tmp_path):

@@ -226,8 +226,8 @@ def test_repair_before_notice_is_before_earliest_notice(files, mess_log):
         assert ref_date(row["repair_date"]) < earliest[pair]
 
 
-@pytest.mark.parametrize("file", [gen.NOTICES_FILE])
-def test_not_in_affected_planted_for_notices(mess_log, file):
+@pytest.mark.parametrize("file", [gen.NOTICES_FILE, gen.REPAIRS_FILE])
+def test_not_in_affected_planted_for_notices_and_repairs(mess_log, file):
     assert any(r["file"] == file for r in log_rows(mess_log, "NOT_IN_AFFECTED"))
 
 
@@ -298,7 +298,7 @@ def test_day_61_example_is_61_days_inclusive():
     assert (plant.DAY61_REPAIR - plant.DAY60_NOTICE).days + 1 == 61
 
 
-def test_business_case_rows_are_not_in_mess_log(data_dir, mess_log):
+def test_only_unaffected_repair_case_has_a_data_issue(data_dir, mess_log):
     by_file = gen.generate(**({"seed": 7, "n_vehicles": 60}
                               if "seed7" in str(data_dir)
                               else {"seed": 42, "n_vehicles": 500}),
@@ -307,7 +307,11 @@ def test_business_case_rows_are_not_in_mess_log(data_dir, mess_log):
                  for n, r in enumerate(rows, start=2)
                  if r.tag.startswith("case:")}
     logged = {(r["file"], int(r["row_num"])) for r in mess_log}
-    assert case_rows & logged == set()
+    outside_repairs = {(f, n) for f, rows in by_file.items()
+                       for n, r in enumerate(rows, start=2)
+                       if r.tag == "case:unaffected_repair"}
+    assert len(outside_repairs) == 1
+    assert case_rows & logged == outside_repairs
 
 
 # ---- hostile tech note --------------------------------------------------

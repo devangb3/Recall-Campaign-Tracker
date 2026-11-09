@@ -138,7 +138,7 @@ Row issues have one of three actions:
   the accepted source table.
 - **Dropped duplicate:** `DUPLICATE_ROW`. The first accepted pair/date stays.
   Repair-note text is not part of the duplicate key.
-- **Kept:** `DATE_CONFLICT`, `REPAIR_BEFORE_NOTICE`, `NOT_IN_AFFECTED` (notices only),
+- **Kept:** `DATE_CONFLICT`, `REPAIR_BEFORE_NOTICE`, `NOT_IN_AFFECTED` (notices and repairs),
   and `ELIGIBILITY_UNAVAILABLE` (repairs with unusable or absent masters).
   Accepted facts remain available, with a separate reason describing the
   problem. The pipeline creates data-quality findings for kept issues

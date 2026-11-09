@@ -9,8 +9,8 @@ Order of work:
 2. Check every row (validate). Safe fixes come from normalize.py. A row
    with a bad or blank value is quarantined with an issue code and a
    reason. Then, on the rows that are left: repeated rows are dropped,
-   and date conflicts, repairs before the notice, and notices for vehicles
-   absent from the affected file are flagged but kept. Vehicle/campaign
+   and date conflicts, repairs before the notice, and notices or repairs for
+   vehicles absent from the affected file are flagged but kept. Vehicle/campaign
    masters also supply the independent unaffected-repair eligibility check.
 3. Load everything in one SQLite transaction (load). Before commit, the
    row balance must hold for every file:
@@ -412,12 +412,13 @@ def _flag_date_conflicts(result: IngestResult, name: str) -> None:
 
 def _flag_not_in_affected(result: IngestResult) -> None:
     affected = {(r.vin, r.campaign_id) for r in result.clean[AFFECTED_FILE]}
-    for row in result.clean[NOTICES_FILE]:
-        if (row.vin, row.campaign_id) not in affected:
-            _row_issue(
-                result, row, "NOT_IN_AFFECTED", "",
-                f"VIN {row.vin} is not listed as affected by campaign "
-                f"{row.campaign_id}.")
+    for name in DATE_COLUMN:
+        for row in result.clean[name]:
+            if (row.vin, row.campaign_id) not in affected:
+                _row_issue(
+                    result, row, "NOT_IN_AFFECTED", "",
+                    f"VIN {row.vin} is not listed as affected by campaign "
+                    f"{row.campaign_id}.")
 
 
 def _flag_missing_eligibility(result: IngestResult) -> None:

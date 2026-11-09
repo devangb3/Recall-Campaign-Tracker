@@ -73,7 +73,8 @@ def test_outside_affected_rows_remain_available_for_quality(snapshot_db):
     assert extra
     outside_pairs = {(i.vin, i.campaign_id) for i in snapshot.data_issues
                      if i.issue_code == "NOT_IN_AFFECTED"}
-    assert outside_pairs == {(f.vin, f.campaign_id) for f in extra if f.notices}
+    assert outside_pairs == {(f.vin, f.campaign_id) for f in extra
+                             if f.notices or f.repairs}
     assert any(f.repairs and not f.notices for f in extra)
     assert all(facts.notices or facts.repairs for facts in extra)
     assert not outside_pairs & {(p.vin, p.campaign_id)
@@ -98,7 +99,7 @@ def test_bad_notice_still_proves_pair_was_in_file(snapshot_db):
 def test_every_issue_keeps_original_raw_evidence(snapshot_db):
     con, _, _ = snapshot_db
     snapshot = read_snapshot(con)
-    assert len(snapshot.data_issues) == 26
+    assert len(snapshot.data_issues) == 27
     assert {i.action for i in snapshot.data_issues} == {
         "kept", "quarantined", "dropped_duplicate"}
     expected = con.execute(

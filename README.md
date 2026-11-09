@@ -61,6 +61,10 @@ both dates. A mismatch produces one flag per VIN/campaign, with all accepted
 repair dates and the model/date evidence, in the separate **Flagged repairs**
 tab. 
 
+Notices and repairs absent from `affected_vehicles.csv` also receive the
+separate `NOT_IN_AFFECTED` data-quality warning. An eligible vehicle missing
+from that file receives this warning without an unaffected-vehicle repair flag.
+
 The repair limit defaults to **60 inclusive days**. Notice on January 1,
 2026 and repair on March 1 is day 60 (on time); March 2 is day 61 (late).
 The earliest notice starts the clock and the earliest repair on or after

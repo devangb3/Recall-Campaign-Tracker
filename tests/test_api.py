@@ -37,7 +37,7 @@ def test_check_returns_a_json_report_with_separate_business_and_data_issues(app)
     assert {finding["kind"] for finding in report["findings"]} == {
         "notification", "repair"}
     assert {finding["kind"] for finding in report["data_quality"]} == {"data quality"}
-    assert len(report["data_issues"]) == 26
+    assert len(report["data_issues"]) == 27
     assert any(issue["vin"] is None for issue in report["data_issues"])
     assert json.loads(json.dumps(result)) == result
     assert app.request("GET", "/api/report") == (200, result)

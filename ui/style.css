@@ -10,7 +10,7 @@
 body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
 
 .topbar { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; box-shadow: var(--shadow); }
-.topbar-inner, main { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+.topbar-inner, main { max-width: none; margin: 0 auto; padding: 0 24px; }
 .topbar-inner { padding-top: 22px; padding-bottom: 22px; }
 
 .dealer { margin: 0 0 2px; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.8); }
@@ -112,6 +112,18 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 .views { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 14px; }
 .views a { padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 600; border: 1px solid var(--line); background: var(--panel); }
 .views a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.workspace { margin-top: 16px; }
+.list-pane, #detail { min-width: 0; }
+main.is-split .workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
+  column-gap: 22px;
+  align-items: start;
+}
+#data-problems.data-section { margin-top: 0; padding-top: 0; border-top: 0; }
+@media (max-width: 860px) {
+  main.is-split .workspace { grid-template-columns: 1fr; }
+}
 .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 6px 0 8px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .filter { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .filter input, .filter select { font: inherit; padding: 6px 8px; border: 1px solid #c9d1de; border-radius: 8px; background: #fff; color: inherit; }

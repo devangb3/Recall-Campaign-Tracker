@@ -1,22 +1,24 @@
 "use strict";
 
-// Every value from the API is written with textContent, never innerHTML.
-// raw_row can hold a repair tech_note, which is data and not markup.
-
 // The one dealership this tracker is for. Change the name here only.
 const DEALERSHIP_NAME = "Infinachi Auto Repairs";
 
-const $ = (id) => document.getElementById(id);
-
-// The report currently on screen (as returned by the API).
-let current = null;
-
 const STATUSES = ["reviewed", "follow up", "no action"];
+const EXPORT_KEYS = ["findings", "flaggedRepairs", "data", "vehicles", "runs", "checks", "decisions"];
+const CHECK_ROW_CAP = 500;
+const NO_CHECK = "No check has been run yet. Choose \u201cRun check\u201d to load the five CSV files.";
 
-function vehicleLink(vin, campaign) {
-  const link = el("a", vin, "mono vin-link");
-  link.href = `#/vehicle/${encodeURIComponent(vin)}/${encodeURIComponent(campaign)}`;
-  return link;
+class ParseError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ParseError";
+  }
+}
+
+function $(id) {
+  const node = document.getElementById(id);
+  if (node === null) throw new Error("missing #" + id);
+  return node;
 }
 
 function el(tag, text, className) {
@@ -26,67 +28,26 @@ function el(tag, text, className) {
   return node;
 }
 
-async function api(method, path, body) {
-  const options = { method, headers: {} };
-  if (body !== undefined) {
-    options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-  let response;
-  try {
-    response = await fetch(path, options);
-  } catch (err) {
-    return { status: 0, data: { error: "Cannot reach the tracker server." } };
-  }
-  let data;
-  try {
-    data = await response.json();
-  } catch (err) {
-    data = { error: "The server sent an unreadable response." };
-  }
-  return { status: response.status, data };
-}
-
 function table(columns, rows, cell) {
   const wrap = el("div", null, "table-wrap");
-  const t = el("table");
+  const grid = el("table");
   const head = el("tr");
   columns.forEach((name) => head.appendChild(el("th", name)));
-  t.appendChild(el("thead")).appendChild(head);
+  grid.appendChild(el("thead")).appendChild(head);
   const body = el("tbody");
   rows.forEach((row) => {
     const tr = el("tr");
     cell(row).forEach((value) => {
       const td = el("td");
       if (value instanceof Node) td.appendChild(value);
-      else td.textContent = value === null || value === undefined ? "—" : value;
+      else td.textContent = value === null || value === undefined ? "\u2014" : value;
       tr.appendChild(td);
     });
     body.appendChild(tr);
   });
-  t.appendChild(body);
-  wrap.appendChild(t);
+  grid.appendChild(body);
+  wrap.appendChild(grid);
   return wrap;
-}
-
-// A data-issue VIN links to the vehicle only when that pair is in the report.
-function issueVin(report, d) {
-  if (d.vin === null) return "not readable";
-  const known = d.campaign_id !== null && report.vehicles.some(
-    (v) => v.vin === d.vin && v.campaign_id === d.campaign_id);
-  return known ? vehicleLink(d.vin, d.campaign_id) : el("span", d.vin, "mono");
-}
-
-function codeCell(d) {
-  const box = el("div");
-  box.appendChild(el("div", d.issue_code, "nowrap"));
-  box.appendChild(el("div", d.action, "hint"));
-  return box;
-}
-
-function fill(id, node) {
-  const target = $(id);
-  target.replaceChildren(node);
 }
 
 function empty(text) {
@@ -101,392 +62,903 @@ function showMessage(text, isError) {
 }
 
 function clearMessage() {
-  $("message").hidden = true;
-  $("message").textContent = "";
+  const box = $("message");
+  box.hidden = true;
+  box.textContent = "";
+  box.className = "";
 }
 
-// A failed load shows only the error. No findings, empty or old, stay on screen.
-function showError(text) {
-  current = null;
-  clearPrintCopy();
-  $("input-warning").hidden = true;
-  $("export-pdf").disabled = true;
-  $("report").hidden = true;
-  $("detail").hidden = true;
-  $("history").hidden = true;
-  $("flagged-repairs").hidden = true;
-  showMessage(text, true);
+function kindBadge(kind) {
+  const tone = kind === "data quality" ? "data" : kind.replaceAll(" ", "-");
+  return el("span", kind, "kind kind-" + tone);
 }
 
-function showNoCheckYet() {
-  current = null;
-  clearPrintCopy();
-  $("input-warning").hidden = true;
-  $("export-pdf").disabled = true;
-  $("report").hidden = true;
-  $("detail").hidden = true;
-  $("history").hidden = true;
-  $("flagged-repairs").hidden = true;
-  showMessage("No check has been run yet. Choose “Run check” to load the five CSV files.", false);
+function statusBadge(status) {
+  return el("span", status, "status status-" + status.replaceAll(" ", "-"));
 }
 
-// When the CSV files were last read. Reload and Apply reuse that data, so
-// the header must say how old it is (the files are not re-read on those).
-function loadedText(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "at an unknown time";
-  // Same year-month-day style as every other date on screen, in the
-  // viewer's own time zone. The generic name (ET, not EST or EDT) stays right
-  // in both summer and winter time.
-  const pad = (n) => String(n).padStart(2, "0");
-  const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "shortGeneric" })
-    .formatToParts(d).find((part) => part.type === "timeZoneName");
-  return `on ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}${zone ? ` ${zone.value}` : ""}`;
+function codeCell(row) {
+  const box = el("div");
+  box.appendChild(el("div", row.issue_code, "nowrap"));
+  box.appendChild(el("div", row.action, "hint"));
+  return box;
 }
 
-// The server words data problems with the CSV style MM/DD/YYYY. Show real
-// dates the way the rest of the screen does (YYYY-MM-DD). A value that is not
-// a real date (13/01/2026, 02/30/2026) stays as written: it is the problem.
+// A date that is not a real calendar day stays as written. It is the problem.
 function isoDates(text) {
   return text.replace(/\b(\d{2})\/(\d{2})\/(\d{4})\b/g, (found, mm, dd, yyyy) => {
     const d = new Date(Date.UTC(+yyyy, +mm - 1, +dd));
     const real = d.getUTCFullYear() === +yyyy && d.getUTCMonth() === +mm - 1 && d.getUTCDate() === +dd;
-    return real ? `${yyyy}-${mm}-${dd}` : found;
+    return real ? yyyy + "-" + mm + "-" + dd : found;
   });
 }
 
-// The print-only copy is built when "Export PDF" is chosen. Throw it away
-// whenever the screen changes, so Ctrl+P can never print an earlier export
-// after an error or on newer data.
+// shortGeneric stays ET all year. EST and EDT would each be wrong for half of it.
+function loadedText(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "at an unknown time";
+  const pad = (n) => String(n).padStart(2, "0");
+  const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "shortGeneric" })
+    .formatToParts(d).find((part) => part.type === "timeZoneName");
+  return "on " + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " +
+    pad(d.getHours()) + ":" + pad(d.getMinutes()) + (zone ? " " + zone.value : "");
+}
+
+function filesNote(inputCheck) {
+  if (!inputCheck || inputCheck.state === "ok") return null;
+  if (inputCheck.state === "unusable") {
+    return inputCheck.message + " This is the last good report; nothing has been checked again. " +
+      "Fix the files, then choose \u201cRun check\u201d.";
+  }
+  return inputCheck.message + " This report is from the earlier data. Choose \u201cRun check\u201d to load the new files.";
+}
+
+function textHit(needle, parts) {
+  const wanted = needle.trim().toLowerCase();
+  if (wanted === "") return true;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part === null || part === undefined) continue;
+    if (String(part).toLowerCase().includes(wanted)) return true;
+  }
+  return false;
+}
+
+function vinHit(needle, vin) {
+  const wanted = needle.trim().toLowerCase();
+  if (wanted === "") return true;
+  if (vin === null || vin === undefined) return false;
+  return String(vin).toLowerCase().includes(wanted);
+}
+
+function vehicleKey(vin, campaignId) {
+  return vin + "\u0000" + campaignId;
+}
+
+function linkOrText(vin, campaignId, index, lensId) {
+  if (vin === null || vin === undefined) return "not readable";
+  if (campaignId === null || campaignId === undefined) return el("span", vin, "mono");
+  if (!index.vehiclesByKey.has(vehicleKey(vin, campaignId))) return el("span", vin, "mono");
+  return vehicleLink(vin, campaignId, lensId);
+}
+
+function vehicleLink(vin, campaignId, lensId) {
+  const link = el("a", vin, "mono vin-link");
+  link.href = hashFor(lensId, { vin: vin, campaignId: campaignId });
+  return link;
+}
+
+const FLAGGED_COLUMNS = ["VIN", "Campaign", "Vehicle model", "Build date",
+  "Campaign model", "Build date range (inclusive)", "Flag", "Repair dates", "Reason"];
+
+function flaggedRepairCells(row, link, index, lensId) {
+  const vehicle = row.facts.vehicle;
+  const campaign = row.facts.campaign;
+  return [
+    link ? linkOrText(row.vin, row.campaign_id, index, lensId) : el("span", row.vin, "mono"),
+    row.campaign_id,
+    vehicle.model,
+    vehicle.build_date,
+    campaign.model,
+    campaign.start_date + " to " + campaign.end_date,
+    "Repair on an unaffected vehicle",
+    row.facts.repairs.map((item) => item.repair_date).join(", "),
+    row.reason,
+  ];
+}
+
+// The band hides one data-problems pane. It is not a row predicate.
+const LENS_CATALOG = Object.freeze([
+  Object.freeze({
+    id: "findings",
+    hash: "#",
+    aliases: Object.freeze(["", "#/", "#/findings"]),
+    navId: "nav-flags",
+    regionId: "report",
+    filtersId: "findings-filters",
+    fields: Object.freeze([
+      Object.freeze({ key: "text", label: "Search", control: "search" }),
+      Object.freeze({
+        key: "kind", label: "Kind", control: "enum",
+        labels: Object.freeze({ "": "Any", notification: "notification", repair: "repair" }),
+      }),
+      Object.freeze({ key: "campaign", label: "Campaign", control: "distinct", prop: "campaign_id" }),
+    ]),
+    panes: Object.freeze([
+      Object.freeze({
+        id: "findings",
+        mountId: "findings",
+        columns: Object.freeze(["VIN", "Campaign", "Kind", "Reason"]),
+        ordered: (index) => index.findings,
+        emptySource: "No findings in this check.",
+        emptyMatch: "No findings match these filters.",
+        match(row, query) {
+          if (query.kind !== "" && row.kind !== query.kind) return false;
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          return textHit(query.text, [row.vin, row.campaign_id, row.reason]);
+        },
+        cells(row, index, lensId) {
+          return [
+            linkOrText(row.vin, row.campaign_id, index, lensId),
+            el("span", row.campaign_id, "nowrap"),
+            kindBadge(row.kind),
+            isoDates(row.reason),
+          ];
+        },
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: "flaggedRepairs",
+    hash: "#/flagged-repairs",
+    aliases: Object.freeze([]),
+    navId: "nav-flagged-repairs",
+    regionId: "flagged-repairs",
+    filtersId: "flagged-filters",
+    fields: Object.freeze([
+      Object.freeze({ key: "text", label: "Search", control: "search" }),
+      Object.freeze({ key: "campaign", label: "Campaign", control: "distinct", prop: "campaign_id" }),
+    ]),
+    panes: Object.freeze([
+      Object.freeze({
+        id: "flagged",
+        mountId: "flagged-repairs-list",
+        columns: FLAGGED_COLUMNS,
+        ordered: (index) => index.flaggedRepairs,
+        emptySource: "No repairs on unaffected vehicles in this check.",
+        emptyMatch: "No flagged repairs match these filters.",
+        match(row, query) {
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          return textHit(query.text, [
+            row.vin, row.campaign_id, row.reason,
+            row.facts.vehicle.model, row.facts.campaign.model,
+          ]);
+        },
+        cells(row, index, lensId) {
+          return flaggedRepairCells(row, true, index, lensId);
+        },
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: "dataProblems",
+    hash: "#/data-problems",
+    aliases: Object.freeze([]),
+    navId: "nav-data-problems",
+    regionId: "data-problems",
+    filtersId: "data-filters",
+    fields: Object.freeze([
+      Object.freeze({ key: "text", label: "Search", control: "search" }),
+      Object.freeze({
+        key: "band", label: "Show", control: "enum",
+        labels: Object.freeze({
+          "": "Any",
+          issues: "Data issues",
+          quality: "Vehicle data-quality flags",
+        }),
+      }),
+      Object.freeze({ key: "campaign", label: "Campaign", control: "distinct", prop: "campaign_id" }),
+    ]),
+    panes: Object.freeze([
+      Object.freeze({
+        id: "issues",
+        mountId: "data-issues",
+        bandId: "issues-band",
+        columns: Object.freeze(["File and row", "Code and action", "VIN", "Campaign", "Reason", "Raw row"]),
+        ordered: (index) => index.dataIssues,
+        emptySource: "No data issues.",
+        emptyMatch: "No data issues match these filters.",
+        match(row, query) {
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          return textHit(query.text, [row.vin, row.campaign_id, row.reason, row.file, row.issue_code]);
+        },
+        cells(row, index, lensId) {
+          const details = el("details");
+          details.appendChild(el("summary", "Show"));
+          details.appendChild(el("pre", row.raw_row, "mono"));
+          return [
+            el("span", row.file + " \u00b7 row " + row.src_row, "nowrap"),
+            codeCell(row),
+            linkOrText(row.vin, row.campaign_id, index, lensId),
+            row.campaign_id === null ? "not readable" : el("span", row.campaign_id, "nowrap"),
+            isoDates(row.reason),
+            details,
+          ];
+        },
+      }),
+      Object.freeze({
+        id: "quality",
+        mountId: "data-quality",
+        bandId: "quality-band",
+        columns: Object.freeze(["VIN", "Campaign", "Reason"]),
+        ordered: (index) => index.dataQuality,
+        emptySource: "No vehicle data-quality flags.",
+        emptyMatch: "No data-quality flags match these filters.",
+        match(row, query) {
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          return textHit(query.text, [row.vin, row.campaign_id, row.reason]);
+        },
+        cells(row, index, lensId) {
+          return [
+            linkOrText(row.vin, row.campaign_id, index, lensId),
+            el("span", row.campaign_id, "nowrap"),
+            isoDates(row.reason),
+          ];
+        },
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: "history",
+    hash: "#/history",
+    aliases: Object.freeze([]),
+    navId: "nav-history",
+    regionId: "history",
+    filtersId: "history-filters",
+    runsMountId: "history-runs",
+    fields: Object.freeze([
+      Object.freeze({ key: "vin", label: "VIN contains", control: "search", placeholder: "e.g. SYN4P" }),
+      Object.freeze({ key: "campaign", label: "Campaign", control: "distinct", prop: "campaign_id" }),
+      Object.freeze({
+        key: "kind", label: "Kind", control: "enum",
+        labels: Object.freeze({
+          "": "Any",
+          notification: "notification",
+          repair: "repair",
+          "data quality": "data quality",
+          "unaffected repair": "Repair on an unaffected vehicle",
+        }),
+      }),
+      Object.freeze({ key: "from", label: "Check date from", control: "date" }),
+      Object.freeze({ key: "to", label: "to", control: "date" }),
+      Object.freeze({
+        key: "decision", label: "Current decision", control: "enum",
+        labels: Object.freeze({
+          "": "Any",
+          none: "No decision yet",
+          reviewed: "reviewed",
+          "follow up": "follow up",
+          "no action": "no action",
+        }),
+      }),
+      Object.freeze({ key: "limit", label: "Day limit used", control: "distinct", prop: "day_limit" }),
+    ]),
+    panes: Object.freeze([
+      Object.freeze({
+        id: "checks",
+        mountId: "history-checks",
+        columns: Object.freeze(["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"]),
+        ordered: (index) => index.historyNewest,
+        emptySource: "No checks have been saved yet.",
+        emptyMatch: "No checks match these filters.",
+        count(shown, matching, total) {
+          const base = "Showing " + shown + " of " + matching + " matching checks (" + total + " saved in total)";
+          if (matching > shown) return base + ". Narrow the filters to see the rest.";
+          return base + ".";
+        },
+        match(row, query, index) {
+          if (!vinHit(query.vin, row.vin)) return false;
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          if (query.kind !== "" && row.kind !== query.kind) return false;
+          if (query.from !== "" && row.check_date < query.from) return false;
+          if (query.to !== "" && row.check_date > query.to) return false;
+          if (query.limit !== "" && String(row.day_limit) !== query.limit) return false;
+          if (query.decision !== "") {
+            const decision = index.decisionByKey.get(vehicleKey(row.vin, row.campaign_id));
+            if (query.decision === "none") return decision === undefined;
+            return decision !== undefined && decision.status === query.decision;
+          }
+          return true;
+        },
+        cells(row, index, lensId) {
+          const decision = index.decisionByKey.get(vehicleKey(row.vin, row.campaign_id));
+          return [
+            el("span", row.check_date, "nowrap"),
+            linkOrText(row.vin, row.campaign_id, index, lensId),
+            el("span", row.campaign_id, "nowrap"),
+            kindBadge(row.kind),
+            isoDates(row.reason),
+            row.day_limit,
+            decision === undefined ? "\u2014" : statusBadge(decision.status),
+          ];
+        },
+      }),
+      Object.freeze({
+        id: "decisions",
+        mountId: "history-decisions",
+        columns: Object.freeze(["Decided on", "VIN", "Campaign", "Status", "Note"]),
+        ordered: (index) => index.decisionsNewest,
+        emptySource: "No decisions have been recorded yet.",
+        emptyMatch: "No decisions match the VIN and campaign filters.",
+        match(row, query) {
+          if (!vinHit(query.vin, row.vin)) return false;
+          if (query.campaign !== "" && row.campaign_id !== query.campaign) return false;
+          return true;
+        },
+        cells(row, index, lensId) {
+          return [
+            el("span", row.decided_on, "nowrap"),
+            linkOrText(row.vin, row.campaign_id, index, lensId),
+            el("span", row.campaign_id, "nowrap"),
+            statusBadge(row.status),
+            row.note,
+          ];
+        },
+      }),
+    ]),
+  }),
+]);
+
+function lensById(lensId) {
+  const lens = LENS_CATALOG.find((entry) => entry.id === lensId);
+  if (lens === undefined) throw new Error("unknown lens " + lensId);
+  return lens;
+}
+
+function emptyQuery(lens) {
+  const query = {};
+  for (const field of lens.fields) query[field.key] = "";
+  return query;
+}
+
+function samePin(left, right) {
+  if (left === null || right === null) return left === right;
+  return left.vin === right.vin && left.campaignId === right.campaignId;
+}
+
+function parseHash(hash) {
+  let text = hash || "";
+  if (text.length > 1 && text.endsWith("/")) text = text.slice(0, -1);
+  const vehicle = /\/vehicle\/([^/]+)\/([^/]*)$/.exec(text);
+  let pin = null;
+  let rest = text;
+  if (vehicle) {
+    rest = text.slice(0, vehicle.index);
+    try {
+      pin = {
+        vin: decodeURIComponent(vehicle[1]),
+        campaignId: decodeURIComponent(vehicle[2]),
+      };
+    } catch (err) {
+      pin = null;
+    }
+    if (pin !== null && (pin.vin === "" || pin.campaignId === "")) pin = null;
+  }
+  const lens = LENS_CATALOG.find((entry) => entry.hash === rest || entry.aliases.includes(rest));
+  if (lens === undefined) return { lensId: "findings", pin: pin };
+  return { lensId: lens.id, pin: pin };
+}
+
+function hashFor(lensId, pin) {
+  const lens = lensById(lensId);
+  if (pin === null) return lens.hash;
+  return lens.hash + "/vehicle/" + encodeURIComponent(pin.vin) + "/" + encodeURIComponent(pin.campaignId);
+}
+
+function reflectHash(cursor) {
+  const current = parseHash(location.hash);
+  if (current.lensId === cursor.lensId && samePin(current.pin, cursor.pin)) return;
+  location.hash = hashFor(cursor.lensId, cursor.pin);
+}
+
+function matchesFor(lens, query, index) {
+  const matches = {};
+  for (const pane of lens.panes) {
+    const rows = pane.ordered(index);
+    const indexes = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (pane.match(rows[i], query, index)) indexes.push(i);
+    }
+    matches[pane.id] = indexes;
+  }
+  return matches;
+}
+
+function cursorFrom(nav, index) {
+  const queries = {};
+  for (const lens of LENS_CATALOG) queries[lens.id] = emptyQuery(lens);
+  const lens = lensById(nav.lensId);
+  return {
+    lensId: nav.lensId,
+    pin: nav.pin,
+    queries: queries,
+    matches: matchesFor(lens, queries[lens.id], index),
+  };
+}
+
+function retarget(cursor, index) {
+  const lens = lensById(cursor.lensId);
+  return {
+    lensId: cursor.lensId,
+    pin: cursor.pin,
+    queries: cursor.queries,
+    matches: matchesFor(lens, cursor.queries[lens.id], index),
+  };
+}
+
+function withRuns(index, runs) {
+  return Object.assign({}, index, { runs: runs });
+}
+
+function byNewest(rows, field) {
+  return Object.freeze(rows.slice().reverse().sort((left, right) => {
+    if (left[field] < right[field]) return 1;
+    if (left[field] > right[field]) return -1;
+    return 0;
+  }));
+}
+
+function sameDecision(left, right) {
+  const vehicleDecision = left === undefined ? null : left;
+  const winner = right === undefined ? null : right;
+  if (vehicleDecision === null || winner === null) return vehicleDecision === winner;
+  return vehicleDecision.vin === winner.vin
+    && vehicleDecision.campaign_id === winner.campaign_id
+    && vehicleDecision.status === winner.status
+    && vehicleDecision.decided_on === winner.decided_on
+    && vehicleDecision.note === winner.note;
+}
+
+function requireArray(report, key) {
+  const value = report[key];
+  if (!Array.isArray(value)) throw new ParseError("report." + key + " is missing");
+  return value;
+}
+
+function parseReport(data) {
+  if (data === null || typeof data !== "object") throw new ParseError("report envelope is missing");
+  if (data.run_id === undefined || data.run_id === null || data.run_id === "") {
+    throw new ParseError("run_id is missing");
+  }
+  if (data.ingest_id === undefined || data.ingest_id === null || data.ingest_id === "") {
+    throw new ParseError("ingest_id is missing");
+  }
+  if (typeof data.loaded_at !== "string" || data.loaded_at === "") throw new ParseError("loaded_at is missing");
+  const report = data.report;
+  if (report === null || typeof report !== "object") throw new ParseError("report is missing");
+  if (typeof report.check_date !== "string" || report.check_date === "") {
+    throw new ParseError("report.check_date is missing");
+  }
+  if (typeof report.day_limit !== "number" || !Number.isInteger(report.day_limit)) {
+    throw new ParseError("report.day_limit is missing");
+  }
+  let inputCheck = null;
+  if (data.input_check !== undefined && data.input_check !== null) {
+    if (typeof data.input_check !== "object") throw new ParseError("input_check is missing");
+    inputCheck = data.input_check;
+  }
+  const findings = Object.freeze(requireArray(report, "findings"));
+  const flaggedRepairs = Object.freeze(requireArray(report, "flagged_repairs"));
+  const dataQuality = Object.freeze(requireArray(report, "data_quality"));
+  const dataIssues = Object.freeze(requireArray(report, "data_issues"));
+  const decisions = Object.freeze(requireArray(report, "decisions"));
+  const history = Object.freeze(requireArray(report, "history"));
+  const vehicles = Object.freeze(requireArray(report, "vehicles"));
+  const vehiclesByKey = new Map();
+  for (const vehicle of vehicles) {
+    if (vehicle === null || typeof vehicle !== "object"
+        || typeof vehicle.vin !== "string" || typeof vehicle.campaign_id !== "string") {
+      throw new ParseError("vehicle is missing vin or campaign_id");
+    }
+    const key = vehicleKey(vehicle.vin, vehicle.campaign_id);
+    if (vehiclesByKey.has(key)) {
+      throw new ParseError("duplicate vehicle " + vehicle.vin + " " + vehicle.campaign_id);
+    }
+    vehiclesByKey.set(key, vehicle);
+  }
+  const decisionByKey = new Map();
+  for (const decision of decisions) {
+    if (decision === null || typeof decision !== "object"
+        || typeof decision.vin !== "string" || typeof decision.campaign_id !== "string") {
+      throw new ParseError("decision is missing vin or campaign_id");
+    }
+    const key = vehicleKey(decision.vin, decision.campaign_id);
+    const best = decisionByKey.get(key);
+    if (best === undefined || decision.decided_on >= best.decided_on) decisionByKey.set(key, decision);
+  }
+  for (const vehicle of vehicles) {
+    const key = vehicleKey(vehicle.vin, vehicle.campaign_id);
+    const winner = decisionByKey.has(key) ? decisionByKey.get(key) : null;
+    if (!sameDecision(vehicle.decision, winner)) {
+      throw new ParseError("vehicle.decision disagrees with decisions for " + vehicle.vin + " " + vehicle.campaign_id);
+    }
+  }
+  return {
+    runId: data.run_id,
+    ingestId: data.ingest_id,
+    loadedAt: data.loaded_at,
+    inputCheck: inputCheck,
+    checkDate: report.check_date,
+    dayLimit: report.day_limit,
+    findings: findings,
+    flaggedRepairs: flaggedRepairs,
+    dataQuality: dataQuality,
+    dataIssues: dataIssues,
+    decisions: decisions,
+    history: history,
+    vehicles: vehicles,
+    vehiclesByKey: vehiclesByKey,
+    decisionByKey: decisionByKey,
+    historyNewest: byNewest(history, "check_date"),
+    decisionsNewest: byNewest(decisions, "decided_on"),
+    runs: { phase: "idle" },
+  };
+}
+
+function initialState(hash) {
+  return {
+    phase: "loading",
+    message: null,
+    messageIsError: false,
+    desiredNav: parseHash(hash),
+    index: null,
+    cursor: null,
+    exportChoice: {
+      findings: true,
+      flaggedRepairs: true,
+      data: true,
+      vehicles: true,
+      runs: true,
+      checks: false,
+      decisions: true,
+    },
+    busy: false,
+    epoch: 0,
+  };
+}
+
+function dropReport(state, phase, message, isError) {
+  return {
+    phase: phase,
+    message: message,
+    messageIsError: isError,
+    desiredNav: state.desiredNav,
+    index: null,
+    cursor: null,
+    exportChoice: state.exportChoice,
+    busy: false,
+    epoch: state.epoch,
+  };
+}
+
+function messageState(state, text, isError) {
+  return Object.assign({}, state, { message: text, messageIsError: isError, busy: false });
+}
+
+function errorText(data, fallback) {
+  if (data && typeof data.error === "string" && data.error !== "") return data.error;
+  return fallback;
+}
+
+function reduce(state, command) {
+  if (command === null || typeof command !== "object" || typeof command.type !== "string") {
+    throw new Error("illegal command");
+  }
+  switch (command.type) {
+  case "boot": {
+    const epoch = state.epoch + 1;
+    return { state: Object.assign({}, state, { epoch: epoch, busy: true }), effect: { type: "fetchReport", epoch: epoch } };
+  }
+  case "navigate": {
+    const nav = parseHash(command.hash);
+    if (state.phase === "ready" && state.cursor !== null && state.index !== null) {
+      if (state.cursor.lensId === nav.lensId && samePin(state.cursor.pin, nav.pin)) {
+        return { state: state, effect: null };
+      }
+      let index = state.index;
+      let effect = null;
+      if (nav.lensId === "history" && index.runs.phase === "idle") {
+        index = withRuns(index, { phase: "loading" });
+        effect = { type: "fetchRuns", epoch: state.epoch };
+      }
+      const cursor = {
+        lensId: nav.lensId,
+        pin: nav.pin,
+        queries: state.cursor.queries,
+        matches: matchesFor(lensById(nav.lensId), state.cursor.queries[nav.lensId], index),
+      };
+      return {
+        state: Object.assign({}, state, { desiredNav: nav, index: index, cursor: cursor }),
+        effect: effect,
+      };
+    }
+    if (state.desiredNav.lensId === nav.lensId && samePin(state.desiredNav.pin, nav.pin)) {
+      return { state: state, effect: null };
+    }
+    return { state: Object.assign({}, state, { desiredNav: nav }), effect: null };
+  }
+  case "query": {
+    if (state.phase !== "ready" || state.cursor === null || state.index === null) {
+      throw new Error("query requires a ready workspace");
+    }
+    if (command.lensId !== state.cursor.lensId) throw new Error("query lens " + command.lensId + " is not active");
+    if (command.patch === null || typeof command.patch !== "object") throw new Error("query patch is missing");
+    const lens = lensById(command.lensId);
+    const nextQuery = Object.assign({}, state.cursor.queries[lens.id]);
+    let changed = false;
+    for (const key of Object.keys(command.patch)) {
+      const field = lens.fields.find((item) => item.key === key);
+      if (field === undefined) throw new Error("illegal query field " + key);
+      const value = command.patch[key];
+      if (typeof value !== "string") throw new Error("illegal value for " + key);
+      if (field.control === "enum" && !Object.prototype.hasOwnProperty.call(field.labels, value)) {
+        throw new Error("illegal value " + value + " for " + key);
+      }
+      if (nextQuery[key] !== value) {
+        nextQuery[key] = value;
+        changed = true;
+      }
+    }
+    if (!changed) return { state: state, effect: null };
+    const queries = Object.assign({}, state.cursor.queries);
+    queries[lens.id] = nextQuery;
+    return {
+      state: Object.assign({}, state, {
+        cursor: {
+          lensId: state.cursor.lensId,
+          pin: state.cursor.pin,
+          queries: queries,
+          matches: matchesFor(lens, nextQuery, state.index),
+        },
+      }),
+      effect: null,
+    };
+  }
+  case "report": {
+    if (command.epoch !== state.epoch) return { state: state, effect: null };
+    if (command.status === 200) {
+      let index;
+      try {
+        index = parseReport(command.data);
+      } catch (err) {
+        if (err instanceof ParseError) return { state: dropReport(state, "fault", err.message, true), effect: null };
+        throw err;
+      }
+      const cursor = state.cursor === null ? cursorFrom(state.desiredNav, index) : retarget(state.cursor, index);
+      let effect = null;
+      if (cursor.lensId === "history" && index.runs.phase === "idle") {
+        index = withRuns(index, { phase: "loading" });
+        effect = { type: "fetchRuns", epoch: state.epoch };
+      }
+      return {
+        state: Object.assign({}, state, {
+          phase: "ready",
+          message: command.notice || null,
+          messageIsError: false,
+          index: index,
+          cursor: cursor,
+          busy: false,
+        }),
+        effect: effect,
+      };
+    }
+    if (command.status === 400) return { state: dropReport(state, "empty", NO_CHECK, false), effect: null };
+    if (command.status === 422) {
+      return { state: dropReport(state, "fault", errorText(command.data, "The files could not be read."), true), effect: null };
+    }
+    const text = errorText(command.data, state.index === null
+      ? "The report could not be loaded."
+      : "The action could not be completed.");
+    if (state.index === null) return { state: dropReport(state, "fault", text, true), effect: null };
+    return { state: messageState(state, text, true), effect: null };
+  }
+  case "runs": {
+    if (command.epoch !== state.epoch) return { state: state, effect: null };
+    if (state.phase !== "ready" || state.index === null || state.index.runs.phase !== "loading") {
+      return { state: state, effect: null };
+    }
+    const runs = command.status === 200 && Array.isArray(command.data.runs)
+      ? { phase: "ready", rows: command.data.runs }
+      : { phase: "failed", message: errorText(command.data, "The saved runs could not be loaded.") };
+    return { state: Object.assign({}, state, { index: withRuns(state.index, runs) }), effect: null };
+  }
+  case "reload": {
+    const epoch = state.epoch + 1;
+    return {
+      state: Object.assign({}, state, { epoch: epoch, busy: true }),
+      effect: { type: "fetchReport", epoch: epoch, notice: command.notice || null },
+    };
+  }
+  case "runCheck": {
+    const epoch = state.epoch + 1;
+    return {
+      state: Object.assign({}, state, { epoch: epoch, busy: true }),
+      effect: { type: "postJson", path: "/api/checks", body: {}, accept: "report", epoch: epoch },
+    };
+  }
+  case "dayLimit": {
+    if (!Number.isInteger(command.dayLimit) || command.dayLimit < 1) {
+      throw new Error("day limit must be a whole number of 1 or more");
+    }
+    const epoch = state.epoch + 1;
+    return {
+      state: Object.assign({}, state, { epoch: epoch, busy: true }),
+      effect: {
+        type: "postJson",
+        path: "/api/day-limit",
+        body: { day_limit: command.dayLimit },
+        accept: "report",
+        epoch: epoch,
+      },
+    };
+  }
+  case "saveDecision": {
+    if (typeof command.vin !== "string" || command.vin === "") throw new Error("decision vin is missing");
+    if (typeof command.campaignId !== "string" || command.campaignId === "") {
+      throw new Error("decision campaign is missing");
+    }
+    if (!STATUSES.includes(command.status)) throw new Error("illegal status " + command.status);
+    if (typeof command.note !== "string") throw new Error("decision note is missing");
+    const body = { vin: command.vin, campaign_id: command.campaignId, status: command.status };
+    if (command.note !== "") body.note = command.note;
+    const epoch = state.epoch + 1;
+    return {
+      state: Object.assign({}, state, { epoch: epoch, busy: true }),
+      effect: { type: "postJson", path: "/api/decisions", body: body, accept: "thenReload", epoch: epoch },
+    };
+  }
+  case "exportChoice": {
+    if (!EXPORT_KEYS.includes(command.key)) throw new Error("illegal export choice " + command.key);
+    if (typeof command.checked !== "boolean") throw new Error("export choice is missing");
+    if (state.exportChoice[command.key] === command.checked) return { state: state, effect: null };
+    const exportChoice = Object.assign({}, state.exportChoice);
+    exportChoice[command.key] = command.checked;
+    return { state: Object.assign({}, state, { exportChoice: exportChoice }), effect: null };
+  }
+  case "export": {
+    if (state.phase !== "ready" || state.index === null) {
+      return { state: messageState(state, "There is no report to export. Run a check first.", true), effect: null };
+    }
+    if (state.index.inputCheck && state.index.inputCheck.state === "unusable") {
+      return {
+        state: messageState(state, "The input files cannot be read, so this report is not exported. Fix the files and run a check.", true),
+        effect: null,
+      };
+    }
+    return { state: state, effect: { type: "print" } };
+  }
+  case "message":
+    return { state: messageState(state, command.text, command.isError), effect: null };
+  default:
+    throw new Error("illegal command " + command.type);
+  }
+}
+
+// Ctrl+P must not reprint an export from before this screen.
 function clearPrintCopy() {
   $("print-report").replaceChildren();
 }
 
-// Whether the CSV files still match the loaded data (from the API). Reload
-// and the day-limit Apply reuse loaded data and never read the files, so
-// after a file error the last good report comes back. Say so, and do not let
-// it be exported as if it were current.
-function filesNote(inputCheck) {
-  if (!inputCheck || inputCheck.state === "ok") return null;
-  if (inputCheck.state === "unusable") {
-    return `${inputCheck.message} This is the last good report; nothing has been checked again. ` +
-      "Fix the files, then choose \u201cRun check\u201d.";
+function hideWork() {
+  $("app").classList.remove("is-split");
+  $("detail").hidden = true;
+  $("detail").replaceChildren();
+  $("stats").hidden = true;
+  for (const lens of LENS_CATALOG) {
+    $(lens.regionId).hidden = true;
+    for (const pane of lens.panes) $(pane.mountId).replaceChildren();
+    if (lens.runsMountId) $(lens.runsMountId).replaceChildren();
   }
-  return `${inputCheck.message} This report is from the earlier data. Choose \u201cRun check\u201d to load the new files.`;
+  $("issues-band").hidden = false;
+  $("quality-band").hidden = false;
 }
 
-function render(result) {
-  const report = result.report;
-  clearMessage();
-  current = result;
+function showError(text) {
   clearPrintCopy();
-  const note = filesNote(result.input_check);
-  $("input-warning").textContent = note === null ? "" : note;
-  $("input-warning").hidden = note === null;
-  // An unreadable file means a new check would stop; no PDF of old data then.
-  $("export-pdf").disabled = result.input_check !== undefined && result.input_check.state === "unusable";
-  $("day-limit").value = report.day_limit;
-  $("summary").textContent =
-    `Data loaded from files ${loadedText(result.loaded_at)} · check date ${report.check_date} · ` +
-    `run ${result.run_id} · repair limit ${report.day_limit} days`;
+  $("input-warning").hidden = true;
+  $("export-pdf").disabled = true;
+  hideWork();
+  showMessage(text, true);
+}
 
+function showNoCheckYet() {
+  clearPrintCopy();
+  $("input-warning").hidden = true;
+  $("export-pdf").disabled = true;
+  hideWork();
+  showMessage(NO_CHECK, false);
+}
+
+function paintStats(index) {
   const counts = { notification: 0, repair: 0 };
-  report.findings.forEach((f) => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
+  index.findings.forEach((finding) => {
+    counts[finding.kind] = (counts[finding.kind] || 0) + 1;
+  });
   const stats = $("stats");
   stats.replaceChildren();
-  [["Notification findings", counts.notification, "notification"],
-   ["Repair findings", counts.repair, "repair"],
-   ["Flagged repairs", report.flagged_repairs.length, "repair"],
-   ["Data issues", report.data_issues.length, "data"],
-   ["Data-quality flags", report.data_quality.length, "data"]].forEach(([label, n, tone]) => {
-    const card = el("div", null, `stat ${tone}`);
+  [
+    ["Notification findings", counts.notification, "notification"],
+    ["Repair findings", counts.repair, "repair"],
+    ["Flagged repairs", index.flaggedRepairs.length, "repair"],
+    ["Data issues", index.dataIssues.length, "data"],
+    ["Data-quality flags", index.dataQuality.length, "data"],
+  ].forEach(([label, n, tone]) => {
+    const card = el("div", null, "stat " + tone);
     card.appendChild(el("span", String(n), "stat-n"));
     card.appendChild(el("span", label, "stat-l"));
     stats.appendChild(card);
   });
-
-  fill("findings", report.findings.length === 0
-    ? empty("No findings in this check.")
-    : table(["VIN", "Campaign", "Kind", "Reason"], report.findings, (f) =>
-        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), kindBadge(f.kind), isoDates(f.reason)]));
-
-  fill("data-issues", report.data_issues.length === 0
-    ? empty("No data issues.")
-    : table(["File and row", "Code and action", "VIN", "Campaign", "Reason", "Raw row"],
-        report.data_issues, (d) => {
-          const details = el("details");
-          details.appendChild(el("summary", "Show"));
-          details.appendChild(el("pre", d.raw_row, "mono"));
-          return [el("span", `${d.file} \u00b7 row ${d.src_row}`, "nowrap"), codeCell(d),
-                  issueVin(report, d),
-                  d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"),
-                  isoDates(d.reason), details];
-        }));
-
-  fill("data-quality", report.data_quality.length === 0
-    ? empty("No vehicle data-quality flags.")
-    : table(["VIN", "Campaign", "Reason"], report.data_quality, (f) =>
-        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), isoDates(f.reason)]));
-
-  renderFlaggedRepairs(report);
-  route();
 }
 
-function flaggedRepairCells(f, link) {
-  const vehicle = f.facts.vehicle;
-  const campaign = f.facts.campaign;
-  return [link ? vehicleLink(f.vin, f.campaign_id) : el("span", f.vin, "mono"),
-    f.campaign_id, vehicle.model, vehicle.build_date, campaign.model,
-    `${campaign.start_date} to ${campaign.end_date}`, "Repair on an unaffected vehicle",
-    f.facts.repairs.map((r) => r.repair_date).join(", "), f.reason];
+function render(index) {
+  clearPrintCopy();
+  const input_check = index.inputCheck;
+  const note = filesNote(input_check);
+  $("input-warning").textContent = note === null ? "" : note;
+  $("input-warning").hidden = note === null;
+  $("export-pdf").disabled = input_check !== undefined && input_check !== null && input_check.state === "unusable";
+  $("day-limit").value = index.dayLimit;
+  $("summary").textContent = "Data loaded from files " + loadedText(index.loadedAt) +
+    " \u00b7 check date " + index.checkDate + " \u00b7 run " + index.runId +
+    " \u00b7 repair limit " + index.dayLimit + " days";
+  paintStats(index);
+  $("stats").hidden = false;
 }
 
-const FLAGGED_REPAIR_COLUMNS = ["VIN", "Campaign", "Vehicle model", "Build date",
-  "Campaign model", "Build date range (inclusive)", "Flag", "Repair dates", "Reason"];
-
-function renderFlaggedRepairs(report) {
-  fill("flagged-repairs-list", report.flagged_repairs.length === 0
-    ? empty("No repairs on unaffected vehicles in this check.")
-    : table(FLAGGED_REPAIR_COLUMNS, report.flagged_repairs, (f) => flaggedRepairCells(f, true)));
+function buildPrintReport(index, runs, choice) {
+  const input_check = index.inputCheck;
+  fillPrint(index, runs, choice, input_check);
 }
 
-// ---- Vehicle detail (REC-27) ------------------------------------------------
-
-// ---- Check history (REC-26) ----------------------------------------------
-// Read-only. Shows every saved check result and every decision; it never
-// reruns a check or edits anything. Filters work on the report already loaded.
-
-const HISTORY_ROW_LIMIT = 500;
-const historyFilters = { vin: "", campaign: "", kind: "", from: "", to: "", decision: "", limit: "" };
-
-function kindBadge(kind) {
-  return el("span", kind, `kind kind-${kind === "data quality" ? "data" : kind.replaceAll(" ", "-")}`);
+function reportOf(index) {
+  return {
+    check_date: index.checkDate,
+    day_limit: index.dayLimit,
+    findings: index.findings,
+    flagged_repairs: index.flaggedRepairs,
+    data_quality: index.dataQuality,
+    data_issues: index.dataIssues,
+    decisions: index.decisions,
+    history: index.history,
+    vehicles: index.vehicles,
+  };
 }
 
-// Current decision per vehicle and campaign: latest decided_on, then the
-// later record wins. Same rule as the server (contract/decision.py).
-function currentDecisions(decisions) {
-  const byPair = new Map();
-  decisions.forEach((d) => {
-    const key = `${d.vin}\u0000${d.campaign_id}`;
-    const best = byPair.get(key);
-    if (best === undefined || d.decided_on >= best.decided_on) byPair.set(key, d);
-  });
-  return byPair;
-}
-
-function distinct(values) {
-  return Array.from(new Set(values)).sort();
-}
-
-function filterField(labelText, control) {
-  const wrap = el("label", null, "filter");
-  wrap.appendChild(el("span", labelText));
-  wrap.appendChild(control);
-  return wrap;
-}
-
-function selectOf(options, value, onChange) {
-  const select = el("select");
-  options.forEach(([val, text]) => {
-    const option = el("option", text);
-    option.value = val;
-    select.appendChild(option);
-  });
-  select.value = value;
-  select.addEventListener("change", () => onChange(select.value));
-  return select;
-}
-
-function inputOf(type, value, onChange, placeholder) {
-  const input = el("input");
-  input.type = type;
-  input.value = value;
-  if (placeholder) input.placeholder = placeholder;
-  input.addEventListener("input", () => onChange(input.value));
-  return input;
-}
-
-function renderHistory(report) {
-  const root = $("history");
-  root.replaceChildren();
-  const known = new Set(report.vehicles.map((v) => `${v.vin}\u0000${v.campaign_id}`));
-  const currentBy = currentDecisions(report.decisions);
-  const decisionOf = (row) => currentBy.get(`${row.vin}\u0000${row.campaign_id}`);
-  const vehicleCell = (row) => known.has(`${row.vin}\u0000${row.campaign_id}`)
-    ? vehicleLink(row.vin, row.campaign_id) : el("span", row.vin, "mono");
-
-  root.appendChild(el("h2", "Check history"));
-  root.appendChild(el("p",
-    "Every saved check and every coordinator decision. Nothing here reruns a check or changes a record.",
-    "section-note"));
-
-  // Saved runs (filled in when /api/runs answers).
-  root.appendChild(el("h3", "Saved runs"));
-  const runsBox = el("div");
-  runsBox.appendChild(empty("Loading saved runs…"));
-  root.appendChild(runsBox);
-  api("GET", "/api/runs").then(({ status, data }) => {
-    if (status !== 200) {
-      runsBox.replaceChildren(empty(data.error || "The saved runs could not be loaded."));
-      return;
-    }
-    const runs = data.runs.slice().reverse();
-    runsBox.replaceChildren(runs.length === 0 ? empty("No saved runs.") : table(
-      ["Run", "Check date", "Repair day limit", "Data load (ingest)"], runs,
-      (r) => [r.run_id, r.check_date, r.day_limit, r.ingest_id]));
-  });
-
-  // Filters.
-  root.appendChild(el("h3", "Findings checked over time"));
-  const bar = el("div", null, "filters");
-  const results = el("div");
-  const count = el("p", null, "hint filter-count");
-  const rerun = () => showResults();
-  const set = (key) => (value) => { historyFilters[key] = value; rerun(); };
-  const all = (text) => ["", text];
-  bar.appendChild(filterField("VIN contains", inputOf("search", historyFilters.vin, set("vin"), "e.g. SYN4P")));
-  bar.appendChild(filterField("Campaign", selectOf(
-    [all("Any")].concat(distinct(report.history.map((h) => h.campaign_id)).map((c) => [c, c])),
-    historyFilters.campaign, set("campaign"))));
-  bar.appendChild(filterField("Kind", selectOf(
-    [all("Any"), ["notification", "notification"], ["repair", "repair"], ["data quality", "data quality"], ["unaffected repair", "Repair on an unaffected vehicle"]],
-    historyFilters.kind, set("kind"))));
-  bar.appendChild(filterField("Check date from", inputOf("date", historyFilters.from, set("from"))));
-  bar.appendChild(filterField("to", inputOf("date", historyFilters.to, set("to"))));
-  bar.appendChild(filterField("Current decision", selectOf(
-    [all("Any"), ["none", "No decision yet"], ["reviewed", "reviewed"], ["follow up", "follow up"], ["no action", "no action"]],
-    historyFilters.decision, set("decision"))));
-  bar.appendChild(filterField("Day limit used", selectOf(
-    [all("Any")].concat(distinct(report.history.map((h) => h.day_limit)).sort((a, b) => a - b)
-      .map((n) => [String(n), String(n)])),
-    historyFilters.limit, set("limit"))));
-  const clear = el("button", "Clear filters", "secondary");
-  clear.type = "button";
-  clear.addEventListener("click", () => {
-    Object.keys(historyFilters).forEach((k) => { historyFilters[k] = ""; });
-    renderHistory(report);
-  });
-  bar.appendChild(clear);
-  root.appendChild(bar);
-  root.appendChild(count);
-  root.appendChild(results);
-
-  // Newest first; among the same check date the later record comes first.
-  const ordered = report.history.slice().reverse()
-    .sort((a, b) => (a.check_date < b.check_date ? 1 : a.check_date > b.check_date ? -1 : 0));
-
-  function matches(row) {
-    const f = historyFilters;
-    if (f.vin.trim() !== "" && !row.vin.toLowerCase().includes(f.vin.trim().toLowerCase())) return false;
-    if (f.campaign !== "" && row.campaign_id !== f.campaign) return false;
-    if (f.kind !== "" && row.kind !== f.kind) return false;
-    if (f.from !== "" && row.check_date < f.from) return false;
-    if (f.to !== "" && row.check_date > f.to) return false;
-    if (f.limit !== "" && String(row.day_limit) !== f.limit) return false;
-    if (f.decision !== "") {
-      const d = decisionOf(row);
-      if (f.decision === "none" ? d !== undefined : d === undefined || d.status !== f.decision) return false;
-    }
-    return true;
-  }
-
-  function showResults() {
-    const rows = ordered.filter(matches);
-    const shown = rows.slice(0, HISTORY_ROW_LIMIT);
-    count.textContent = `Showing ${shown.length} of ${rows.length} matching checks (${ordered.length} saved in total)` +
-      (rows.length > shown.length ? `. Narrow the filters to see the rest.` : ".");
-    results.replaceChildren();
-    results.appendChild(rows.length === 0
-      ? empty(ordered.length === 0 ? "No checks have been saved yet." : "No checks match these filters.")
-      : table(["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"], shown,
-        (h) => {
-          const d = decisionOf(h);
-          return [el("span", h.check_date, "nowrap"), vehicleCell(h), el("span", h.campaign_id, "nowrap"),
-            kindBadge(h.kind), isoDates(h.reason), h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
-        }));
-
-    // Decisions follow the VIN and campaign filters. The other filters are about checks.
-    const f = historyFilters;
-    const decisions = report.decisions.slice().reverse()
-      .sort((a, b) => (a.decided_on < b.decided_on ? 1 : a.decided_on > b.decided_on ? -1 : 0))
-      .filter((d) => (f.vin.trim() === "" || d.vin.toLowerCase().includes(f.vin.trim().toLowerCase())) &&
-        (f.campaign === "" || d.campaign_id === f.campaign));
-    results.appendChild(el("h3", `Coordinator decisions (${decisions.length})`));
-    results.appendChild(decisions.length === 0
-      ? empty(report.decisions.length === 0 ? "No decisions have been recorded yet." : "No decisions match the VIN and campaign filters.")
-      : table(["Decided on", "VIN", "Campaign", "Status", "Note"], decisions,
-        (d) => [el("span", d.decided_on, "nowrap"), vehicleCell(d), el("span", d.campaign_id, "nowrap"),
-          statusBadge(d.status), d.note]));
-  }
-  showResults();
-}
-
-// ---- PDF export (REC-28) --------------------------------------------------
-// "Export PDF" asks what to include, fills a print-only copy of the loaded
-// report and opens the browser's print dialog; choose "Save as PDF" there.
-// Every part uses the same data as the screen, with data problems kept apart.
-// It reads only what is already loaded (plus the saved-runs list) and
-// contacts no one.
-
-function newestFirst(rows, field) {
-  return rows.slice().reverse()
-    .sort((a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0));
-}
-
-// Every vehicle with a finding, a data-quality flag or a decision.
 function detailVehicles(report) {
   const flagged = new Set();
-  report.findings.concat(report.data_quality, report.flagged_repairs)
-    .forEach((f) => flagged.add(`${f.vin}\u0000${f.campaign_id}`));
-  return report.vehicles.filter((v) => flagged.has(`${v.vin}\u0000${v.campaign_id}`) ||
-    v.decision !== null || v.data_quality_reasons.length > 0);
+  report.findings.concat(report.data_quality, report.flagged_repairs).forEach((row) => {
+    flagged.add(vehicleKey(row.vin, row.campaign_id));
+  });
+  return report.vehicles.filter((vehicle) => flagged.has(vehicleKey(vehicle.vin, vehicle.campaign_id)) ||
+    vehicle.decision !== null || vehicle.data_quality_reasons.length > 0);
 }
 
-// What the person can switch on or off. "checks" is the long one, so it
-// starts off. The summary at the top is always included.
-const exportChoice = { findings: true, flaggedRepairs: true, data: true, vehicles: true, runs: true, checks: false, decisions: true };
-
-function exportParts(report) {
+function exportParts(index) {
+  const report = reportOf(index);
   return [
-    ["findings", "Findings", `${report.findings.length} notification and repair findings`],
-    ["flaggedRepairs", "Flagged repairs", `${report.flagged_repairs.length} repairs on unaffected vehicles`],
+    ["findings", "Findings", report.findings.length + " notification and repair findings"],
+    ["flaggedRepairs", "Flagged repairs", report.flagged_repairs.length + " repairs on unaffected vehicles"],
     ["data", "Missing and bad data",
-      `${report.data_issues.length} data issues and ${report.data_quality.length} vehicle data-quality flags, kept apart`],
-    ["vehicles", "Vehicle detail", `${detailVehicles(report).length} vehicles with a finding, a flag or a decision`],
+      report.data_issues.length + " data issues and " + report.data_quality.length + " vehicle data-quality flags, kept apart"],
+    ["vehicles", "Vehicle detail", detailVehicles(report).length + " vehicles with a finding, a flag or a decision"],
     ["runs", "Saved runs", "each check run with its date and day limit"],
-    ["checks", "Every saved check", `${report.history.length} rows from all saved runs. This can run to many pages`],
-    ["decisions", "Coordinator decisions", `${report.decisions.length} decisions, newest first`],
+    ["checks", "Every saved check", report.history.length + " rows from all saved runs. This can run to many pages"],
+    ["decisions", "Coordinator decisions", report.decisions.length + " decisions, newest first"],
   ];
 }
 
-function openExportDialog() {
-  if (current === null) {
-    showMessage("There is no report to export. Run a check first.", true);
-    return;
-  }
-  const box = $("export-options");
-  box.replaceChildren();
-  exportParts(current.report).forEach(([key, label, note]) => {
-    const row = el("label", null, "export-option");
-    const input = el("input");
-    input.type = "checkbox";
-    input.name = key;
-    input.checked = exportChoice[key];
-    input.addEventListener("change", () => { exportChoice[key] = input.checked; });
-    const text = el("span");
-    text.appendChild(el("strong", label));
-    text.appendChild(el("span", note, "hint"));
-    row.appendChild(input);
-    row.appendChild(text);
-    box.appendChild(row);
-  });
-  $("export-dialog").showModal();
-}
-
 function printSection(root, title, tone, note) {
-  const section = el("section", null, `print-section ${tone || ""}`);
+  const section = el("section", null, "print-section " + (tone || ""));
   section.appendChild(el("h2", title));
   if (note) section.appendChild(el("p", note, "print-note"));
   root.appendChild(section);
@@ -498,41 +970,54 @@ function printTable(section, columns, rows, cell, emptyText) {
 }
 
 function kpi(value, label, tone) {
-  const card = el("div", null, `print-kpi ${tone}`);
+  const card = el("div", null, "print-kpi " + tone);
   card.appendChild(el("span", String(value), "print-kpi-n"));
   card.appendChild(el("span", label, "print-kpi-l"));
   return card;
 }
 
-function buildPrintReport(result, runs, choice) {
-  const report = result.report;
+// A day count here would look overdue. The check does not score this vehicle.
+function inAffectedList(vehicle) {
+  return vehicle.facts.affected.length > 0;
+}
+
+function repairResult(vehicle) {
+  if (!inAffectedList(vehicle)) return "Not applicable (not in the affected list)";
+  if (vehicle.on_time === true) return el("span", "On time", "kind kind-ok");
+  if (vehicle.on_time === false) return el("span", "Late", "kind kind-repair");
+  return vehicle.notice_date_used === null
+    ? "Not applicable (no notice date)" : "No repair on or after the notice";
+}
+
+function fillPrint(index, runs, choice, input_check) {
+  const report = reportOf(index);
   const root = $("print-report");
   root.replaceChildren();
-
-  // Cover band: who, what, which check.
   const cover = el("div", null, "print-cover");
   const title = el("div");
   title.appendChild(el("p", DEALERSHIP_NAME, "print-dealer"));
   title.appendChild(el("h1", "Recall campaign report"));
   cover.appendChild(title);
   const meta = el("dl", null, "print-meta");
-  [["Check date", report.check_date], ["Run", `#${result.run_id}`],
-   ["Repair day limit", `${report.day_limit} days`],
-   ["Data loaded", loadedText(result.loaded_at).replace(/^on /, "")]].forEach(([k, v]) => {
+  [
+    ["Check date", report.check_date],
+    ["Run", "#" + index.runId],
+    ["Repair day limit", report.day_limit + " days"],
+    ["Data loaded", loadedText(index.loadedAt).replace(/^on /, "")],
+  ].forEach(([key, value]) => {
     const item = el("div");
-    item.appendChild(el("dt", k));
-    item.appendChild(el("dd", v));
+    item.appendChild(el("dt", key));
+    item.appendChild(el("dd", value));
     meta.appendChild(item);
   });
   cover.appendChild(meta);
   root.appendChild(cover);
-  const note = filesNote(result.input_check);
+  const note = filesNote(input_check);
   if (note !== null) root.appendChild(el("p", note, "print-warning"));
 
-  // The numbers that matter, big. Notification and repair carry equal weight.
   const counts = { notification: 0, repair: 0 };
-  report.findings.forEach((f) => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
-  const checked = report.vehicles.filter((v) => v.facts.affected.length > 0).length;
+  report.findings.forEach((finding) => { counts[finding.kind] = (counts[finding.kind] || 0) + 1; });
+  const checked = report.vehicles.filter((vehicle) => vehicle.facts.affected.length > 0).length;
   const kpis = el("div", null, "print-kpis");
   kpis.appendChild(kpi(checked, "Vehicles checked (per campaign)", "total"));
   kpis.appendChild(kpi(counts.notification, "Notification findings", "notification"));
@@ -542,144 +1027,80 @@ function buildPrintReport(result, runs, choice) {
   kpis.appendChild(kpi(report.data_quality.length, "Data-quality flags", "data"));
   root.appendChild(kpis);
   root.appendChild(el("p",
-    `Repair window: ${report.day_limit} days, counting both the notice day and the repair day. ` +
+    "Repair window: " + report.day_limit + " days, counting both the notice day and the repair day. " +
     "Data issues and flags are data problems, never findings.", "print-rule"));
 
   if (choice.findings) {
-    const sec = printSection(root, `Findings (${report.findings.length})`, "tone-findings");
-    printTable(sec, ["VIN", "Campaign", "Kind", "Reason"], report.findings,
-      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"),
-        kindBadge(f.kind), isoDates(f.reason)], "No findings in this check.");
+    const section = printSection(root, "Findings (" + report.findings.length + ")", "tone-findings");
+    printTable(section, ["VIN", "Campaign", "Kind", "Reason"], report.findings,
+      (finding) => [el("span", finding.vin, "mono"), el("span", finding.campaign_id, "nowrap"),
+        kindBadge(finding.kind), isoDates(finding.reason)], "No findings in this check.");
   }
-
   if (choice.flaggedRepairs) {
-    const sec = printSection(root, `Flagged repairs (${report.flagged_repairs.length})`, "tone-findings",
+    const section = printSection(root, "Flagged repairs (" + report.flagged_repairs.length + ")", "tone-findings",
       "Campaign eligibility requires a matching model and a build date within the inclusive campaign range.");
-    printTable(sec, FLAGGED_REPAIR_COLUMNS, report.flagged_repairs,
-      (f) => flaggedRepairCells(f, false), "No repairs on unaffected vehicles in this check.");
+    printTable(section, FLAGGED_COLUMNS, report.flagged_repairs,
+      (finding) => flaggedRepairCells(finding, false), "No repairs on unaffected vehicles in this check.");
   }
-
   if (choice.data) {
-    const sec = printSection(root, "Missing and bad data", "tone-data",
+    const section = printSection(root, "Missing and bad data", "tone-data",
       "These are data problems, not findings. A row listed here is never treated as \"not notified\".");
-    sec.appendChild(el("h3", `Data issues (${report.data_issues.length})`));
-    printTable(sec, ["File and row", "Code and action", "VIN", "Campaign", "Reason"], report.data_issues,
-      (d) => [el("span", `${d.file} · row ${d.src_row}`, "nowrap"), codeCell(d),
-        d.vin === null ? "not readable" : el("span", d.vin, "mono"),
-        d.campaign_id === null ? "not readable" : el("span", d.campaign_id, "nowrap"), isoDates(d.reason)],
+    section.appendChild(el("h3", "Data issues (" + report.data_issues.length + ")"));
+    printTable(section, ["File and row", "Code and action", "VIN", "Campaign", "Reason"], report.data_issues,
+      (row) => [el("span", row.file + " \u00b7 row " + row.src_row, "nowrap"), codeCell(row),
+        row.vin === null ? "not readable" : el("span", row.vin, "mono"),
+        row.campaign_id === null ? "not readable" : el("span", row.campaign_id, "nowrap"), isoDates(row.reason)],
       "No data issues.");
-    sec.appendChild(el("h3", `Vehicle data-quality flags (${report.data_quality.length})`));
-    printTable(sec, ["VIN", "Campaign", "Reason"], report.data_quality,
-      (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"), isoDates(f.reason)],
+    section.appendChild(el("h3", "Vehicle data-quality flags (" + report.data_quality.length + ")"));
+    printTable(section, ["VIN", "Campaign", "Reason"], report.data_quality,
+      (finding) => [el("span", finding.vin, "mono"), el("span", finding.campaign_id, "nowrap"), isoDates(finding.reason)],
       "No vehicle data-quality flags.");
   }
-
   if (choice.vehicles) {
     const detail = detailVehicles(report);
-    const sec = printSection(root, `Vehicle detail (${detail.length})`, "tone-vehicles",
+    const section = printSection(root, "Vehicle detail (" + detail.length + ")", "tone-vehicles",
       "Every vehicle with a finding, a data-quality flag or a coordinator decision. " +
       "With no repair on file, days are counted from the notice to the check date.");
-    printTable(sec, ["VIN", "Campaign", "In affected list", "In notices", "Notice used", "Repair used", "Days", "Limit",
+    printTable(section, ["VIN", "Campaign", "In affected list", "In notices", "Notice used", "Repair used", "Days", "Limit",
       "Result", "Current decision", "Data problems"], detail,
-      (v) => [el("span", v.vin, "mono"), el("span", v.campaign_id, "nowrap"),
-        inAffectedList(v) ? "Yes" : "No", v.in_notices ? "Yes" : "No",
-        v.notice_date_used, v.repair_date_used,
-        inAffectedList(v) && v.inclusive_days !== null ? String(v.inclusive_days) : null, v.day_limit, repairResult(v),
-        v.decision === null ? "—" : statusBadge(v.decision.status),
-        v.data_quality_reasons.length === 0 ? "—" : isoDates(v.data_quality_reasons.join(" "))],
+      (vehicle) => [el("span", vehicle.vin, "mono"), el("span", vehicle.campaign_id, "nowrap"),
+        inAffectedList(vehicle) ? "Yes" : "No", vehicle.in_notices ? "Yes" : "No",
+        vehicle.notice_date_used, vehicle.repair_date_used,
+        inAffectedList(vehicle) && vehicle.inclusive_days !== null ? String(vehicle.inclusive_days) : null,
+        vehicle.day_limit, repairResult(vehicle),
+        vehicle.decision === null ? "\u2014" : statusBadge(vehicle.decision.status),
+        vehicle.data_quality_reasons.length === 0 ? "\u2014" : isoDates(vehicle.data_quality_reasons.join(" "))],
       "No vehicles have findings, flags or decisions.");
   }
-
   if (choice.runs) {
-    const sec = printSection(root, "Saved runs", "tone-history",
+    const section = printSection(root, "Saved runs", "tone-history",
       "Every check that was run. A later upload never removes earlier rows.");
-    if (runs === null) sec.appendChild(empty("The saved runs could not be loaded."));
-    else printTable(sec, ["Run", "Check date", "Repair day limit", "Data load (ingest)"], runs.slice().reverse(),
-      (r) => [r.run_id, r.check_date, r.day_limit, r.ingest_id], "No saved runs.");
+    if (runs === null) section.appendChild(empty("The saved runs could not be loaded."));
+    else printTable(section, ["Run", "Check date", "Repair day limit", "Data load (ingest)"], runs.slice().reverse(),
+      (row) => [row.run_id, row.check_date, row.day_limit, row.ingest_id], "No saved runs.");
   }
-
-  const currentBy = currentDecisions(report.decisions);
   if (choice.checks) {
-    const sec = printSection(root, `Every saved check (${report.history.length})`, "tone-history",
+    const section = printSection(root, "Every saved check (" + report.history.length + ")", "tone-history",
       "Newest first. Notification and repair entries are not ranked.");
-    printTable(sec, ["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"],
-      newestFirst(report.history, "check_date"),
-      (h) => {
-        const d = currentBy.get(`${h.vin}\u0000${h.campaign_id}`);
-        return [el("span", h.check_date, "nowrap"), el("span", h.vin, "mono"), el("span", h.campaign_id, "nowrap"),
-          kindBadge(h.kind), isoDates(h.reason), h.day_limit, d === undefined ? "—" : statusBadge(d.status)];
+    printTable(section, ["Check date", "VIN", "Campaign", "Kind", "Reason", "Day limit", "Current decision"],
+      index.historyNewest,
+      (row) => {
+        const decision = index.decisionByKey.get(vehicleKey(row.vin, row.campaign_id));
+        return [el("span", row.check_date, "nowrap"), el("span", row.vin, "mono"), el("span", row.campaign_id, "nowrap"),
+          kindBadge(row.kind), isoDates(row.reason), row.day_limit,
+          decision === undefined ? "\u2014" : statusBadge(decision.status)];
       }, "No checks have been saved yet.");
   }
-
   if (choice.decisions) {
-    const sec = printSection(root, `Coordinator decisions (${report.decisions.length})`, "tone-history",
+    const section = printSection(root, "Coordinator decisions (" + report.decisions.length + ")", "tone-history",
       "Newest first. The latest decision for a vehicle is its current decision; earlier ones stay listed.");
-    printTable(sec, ["Decided on", "VIN", "Campaign", "Status", "Note"],
-      newestFirst(report.decisions, "decided_on"),
-      (d) => [el("span", d.decided_on, "nowrap"), el("span", d.vin, "mono"),
-        el("span", d.campaign_id, "nowrap"), statusBadge(d.status), d.note],
+    printTable(section, ["Decided on", "VIN", "Campaign", "Status", "Note"], index.decisionsNewest,
+      (row) => [el("span", row.decided_on, "nowrap"), el("span", row.vin, "mono"),
+        el("span", row.campaign_id, "nowrap"), statusBadge(row.status), row.note],
       "No decisions have been recorded yet.");
   }
-
-  // Say what this PDF leaves out, so a partial export is not mistaken for the whole report.
-  const left = exportParts(report).filter(([key]) => !choice[key]).map(([, label]) => label);
-  if (left.length > 0) {
-    root.appendChild(el("p", `Not included in this PDF: ${left.join(", ")}.`, "print-omitted"));
-  }
-}
-
-async function exportPdf() {
-  if (current === null) {
-    showMessage("There is no report to export. Run a check first.", true);
-    return;
-  }
-  $("export-dialog").close();
-  if (current.input_check && current.input_check.state === "unusable") {
-    showMessage("The input files cannot be read, so this report is not exported. Fix the files and run a check.", true);
-    return;
-  }
-  const button = $("export-pdf");
-  button.disabled = true;
-  try {
-    let runs = null;
-    if (exportChoice.runs) {
-      const saved = await api("GET", "/api/runs");
-      runs = saved.status === 200 ? saved.data.runs : null;
-    }
-    buildPrintReport(current, runs, Object.assign({}, exportChoice));
-    // The browser uses the page title as the suggested file name.
-    const title = document.title;
-    document.title = `Recall report ${current.report.check_date} run ${current.run_id}`;
-    window.addEventListener("afterprint", () => { document.title = title; }, { once: true });
-    window.print();
-  } finally {
-    button.disabled = current === null || (current.input_check && current.input_check.state === "unusable");
-  }
-}
-
-function route() {
-  if (current === null) return;
-  const match = /^#\/vehicle\/([^/]+)\/([^/]+)$/.exec(location.hash);
-  let parts = null;
-  if (match) {
-    try { parts = [decodeURIComponent(match[1]), decodeURIComponent(match[2])]; }
-    catch (err) { parts = null; }
-  }
-  const onHistory = location.hash === "#/history";
-  const onFlaggedRepairs = location.hash === "#/flagged-repairs";
-  $("report").hidden = parts !== null || onHistory || onFlaggedRepairs;
-  $("detail").hidden = parts === null;
-  $("history").hidden = !onHistory;
-  $("flagged-repairs").hidden = !onFlaggedRepairs;
-  $("nav-flagged-repairs").classList.toggle("active", onFlaggedRepairs);
-  $("nav-flags").classList.toggle("active", !onHistory && !onFlaggedRepairs && parts === null);
-  $("nav-history").classList.toggle("active", onHistory);
-  if (parts !== null) {
-    renderDetail(current.report, parts[0], parts[1]);
-    window.scrollTo(0, 0);
-  } else if (onHistory) {
-    renderHistory(current.report);
-  }
+  const left = exportParts(index).filter(([key]) => !choice[key]).map((part) => part[1]);
+  if (left.length > 0) root.appendChild(el("p", "Not included in this PDF: " + left.join(", ") + ".", "print-omitted"));
 }
 
 function fact(label, value, note) {
@@ -693,153 +1114,121 @@ function fact(label, value, note) {
   return box;
 }
 
-function statusBadge(status) {
-  return el("span", status, `status status-${status.replace(" ", "-")}`);
+function sameVehicle(vin, campaignId) {
+  return (row) => row.vin === vin && row.campaign_id === campaignId;
 }
 
-function sameVehicle(vin, campaign) {
-  return (row) => row.vin === vin && row.campaign_id === campaign;
-}
-
-// The check only runs for vehicles on the affected list. A notice or repair
-// row for any other vehicle is a data-quality flag, so no day count applies.
-function inAffectedList(v) {
-  return v.facts.affected.length > 0;
-}
-
-function repairResult(v) {
-  if (!inAffectedList(v)) return "Not applicable (not in the affected list)";
-  if (v.on_time === true) return el("span", "On time", "kind kind-ok");
-  if (v.on_time === false) return el("span", "Late", "kind kind-repair");
-  return v.notice_date_used === null
-    ? "Not applicable (no notice date)" : "No repair on or after the notice";
-}
-
-function renderDetail(report, vin, campaign) {
+function fillDetail(index, pin, lensId, dispatch) {
   const root = $("detail");
   root.replaceChildren();
-  const back = el("a", "\u2190 Back to flags");
-  back.href = "#";
-  back.className = "back";
-  root.appendChild(back);
-
-  const v = report.vehicles.find(sameVehicle(vin, campaign));
-  if (v === undefined) {
+  const close = el("a", "Close vehicle", "back");
+  close.href = hashFor(lensId, null);
+  root.appendChild(close);
+  const vehicle = index.vehiclesByKey.get(vehicleKey(pin.vin, pin.campaignId));
+  if (vehicle === undefined) {
     root.appendChild(empty("This vehicle and campaign are not in the current report."));
     return;
   }
-
   const title = el("h2", null, "detail-title");
-  title.appendChild(el("span", v.vin, "mono"));
-  title.appendChild(el("span", `  ${v.campaign_id}`, "detail-campaign"));
+  title.appendChild(el("span", vehicle.vin, "mono"));
+  title.appendChild(el("span", "  " + vehicle.campaign_id, "detail-campaign"));
   root.appendChild(title);
 
-  // What the check used.
   const facts = el("dl", null, "facts");
-  const affected = inAffectedList(v);
+  const affected = inAffectedList(vehicle);
   facts.appendChild(fact("In affected list", affected ? "Yes" : "No",
     affected ? "" : "not checked for notice or repair days"));
-  facts.appendChild(fact("In notices file", v.in_notices ? "Yes" : "No"));
+  facts.appendChild(fact("In notices file", vehicle.in_notices ? "Yes" : "No"));
   facts.appendChild(fact("Notice date used",
-    v.notice_date_used === null ? "No usable notice date" : v.notice_date_used,
-    v.notice_date_used === null ? "" : "earliest notice on file"));
+    vehicle.notice_date_used === null ? "No usable notice date" : vehicle.notice_date_used,
+    vehicle.notice_date_used === null ? "" : "earliest notice on file"));
   facts.appendChild(fact("Repair date used",
-    v.repair_date_used === null ? "No usable repair" : v.repair_date_used,
-    v.repair_date_used === null ? "" : "earliest repair on or after the notice"));
-  // No day count for a vehicle outside the affected list: it would look overdue.
+    vehicle.repair_date_used === null ? "No usable repair" : vehicle.repair_date_used,
+    vehicle.repair_date_used === null ? "" : "earliest repair on or after the notice"));
   if (affected) {
     facts.appendChild(fact(
-      v.repair_date_used === null ? "Days since notice" : "Inclusive days, notice to repair",
-      v.inclusive_days === null ? "\u2014" : String(v.inclusive_days),
-      v.repair_date_used === null && v.inclusive_days !== null
-        ? `counted to the check date ${report.check_date}` : ""));
+      vehicle.repair_date_used === null ? "Days since notice" : "Inclusive days, notice to repair",
+      vehicle.inclusive_days === null ? "\u2014" : String(vehicle.inclusive_days),
+      vehicle.repair_date_used === null && vehicle.inclusive_days !== null
+        ? "counted to the check date " + index.checkDate : ""));
   }
-  facts.appendChild(fact("Day limit", `${v.day_limit} days`));
-  facts.appendChild(fact("Repair result", repairResult(v)));
-  if (v.facts.vehicle) {
-    facts.appendChild(fact("Vehicle model", v.facts.vehicle.model));
-    facts.appendChild(fact("Build date", v.facts.vehicle.build_date));
+  facts.appendChild(fact("Day limit", vehicle.day_limit + " days"));
+  facts.appendChild(fact("Repair result", repairResult(vehicle)));
+  if (vehicle.facts.vehicle) {
+    facts.appendChild(fact("Vehicle model", vehicle.facts.vehicle.model));
+    facts.appendChild(fact("Build date", vehicle.facts.vehicle.build_date));
   }
-  if (v.facts.campaign) {
-    facts.appendChild(fact("Campaign model", v.facts.campaign.model));
+  if (vehicle.facts.campaign) {
+    facts.appendChild(fact("Campaign model", vehicle.facts.campaign.model));
     facts.appendChild(fact("Campaign build date range",
-      `${v.facts.campaign.start_date} to ${v.facts.campaign.end_date}`, "both dates included"));
+      vehicle.facts.campaign.start_date + " to " + vehicle.facts.campaign.end_date, "both dates included"));
   }
   root.appendChild(facts);
 
-  // Notification and repair findings for this pair. Data problems come later, apart from these.
-  const pair = sameVehicle(vin, campaign);
-  const found = report.findings.concat(report.flagged_repairs).filter(pair);
+  const pair = sameVehicle(vehicle.vin, vehicle.campaign_id);
+  const found = index.findings.concat(index.flaggedRepairs).filter(pair);
   root.appendChild(el("h3", "Findings for this vehicle"));
-  if (found.length === 0) {
-    root.appendChild(empty("No notification or repair finding for this vehicle."));
-  } else {
+  if (found.length === 0) root.appendChild(empty("No notification or repair finding for this vehicle."));
+  else {
     const list = el("ul", null, "reasons");
-    found.forEach((f) => {
-      const li = el("li");
-      li.appendChild(kindBadge(f.kind));
-      li.appendChild(el("span", ` ${isoDates(f.reason)}`));
-      list.appendChild(li);
+    found.forEach((finding) => {
+      const item = el("li");
+      item.appendChild(kindBadge(finding.kind));
+      item.appendChild(el("span", " " + isoDates(finding.reason)));
+      list.appendChild(item);
     });
     root.appendChild(list);
   }
 
-  // Every date on file, and which one the check used.
   root.appendChild(el("h3", "Dates on file"));
   const rows = [];
-  v.facts.notices.forEach((n) => rows.push(["Notice", n.notice_date, n.notice_date === v.notice_date_used]));
-  v.facts.repairs.forEach((r) => rows.push(["Repair", r.repair_date, r.repair_date === v.repair_date_used]));
+  vehicle.facts.notices.forEach((notice) => rows.push(["Notice", notice.notice_date, notice.notice_date === vehicle.notice_date_used]));
+  vehicle.facts.repairs.forEach((repair) => rows.push(["Repair", repair.repair_date, repair.repair_date === vehicle.repair_date_used]));
   root.appendChild(rows.length === 0
     ? empty("No notice or repair dates on file for this vehicle.")
     : table(["Record", "Date", "Used by the check"], rows,
-        (r) => [r[0], el("span", r[1], "nowrap"), r[2] ? "Yes" : "No"]));
+      (row) => [row[0], el("span", row[1], "nowrap"), row[2] ? "Yes" : "No"]));
 
-  // Data problems for this pair, kept apart from the findings. Same wording is listed once.
-  const problems = new Set(v.data_quality_reasons);
-  report.data_issues.filter(pair).forEach((d) => problems.add(d.reason));
+  const problems = new Set(vehicle.data_quality_reasons);
+  index.dataIssues.filter(pair).forEach((row) => problems.add(row.reason));
   if (problems.size > 0) {
     root.appendChild(el("h3", "Data problems (not findings)"));
     const list = el("ul", null, "reasons");
     problems.forEach((text) => list.appendChild(el("li", isoDates(text))));
     root.appendChild(list);
   }
-
-  root.appendChild(decisionSection(report, v));
+  root.appendChild(decisionSection(index, vehicle, dispatch));
 }
 
-function decisionSection(report, v) {
+function decisionSection(index, vehicle, dispatch) {
   const section = el("section", null, "decision");
   section.appendChild(el("h3", "Coordinator decision"));
-
-  const mine = report.decisions.filter(sameVehicle(v.vin, v.campaign_id));
-  if (v.decision === null) {
-    section.appendChild(el("p", "No decision recorded yet.", "muted"));
-  } else {
+  const mine = index.decisions.filter(sameVehicle(vehicle.vin, vehicle.campaign_id));
+  if (vehicle.decision === null) section.appendChild(el("p", "No decision recorded yet.", "muted"));
+  else {
     const box = el("div", null, "current-decision");
-    box.appendChild(statusBadge(v.decision.status));
-    box.appendChild(el("span", ` on ${v.decision.decided_on}`, "hint"));
-    if (v.decision.note) box.appendChild(el("p", v.decision.note, "note"));
+    box.appendChild(statusBadge(vehicle.decision.status));
+    box.appendChild(el("span", " on " + vehicle.decision.decided_on, "hint"));
+    if (vehicle.decision.note) box.appendChild(el("p", vehicle.decision.note, "note"));
     section.appendChild(box);
   }
-
   const form = el("form", null, "decision-form");
   const fieldset = el("fieldset");
   fieldset.appendChild(el("legend", "Record a decision"));
-  STATUSES.forEach((status, i) => {
+  STATUSES.forEach((status) => {
     const label = el("label", null, "choice");
     const input = el("input");
     input.type = "radio";
     input.name = "status";
     input.value = status;
     input.required = true;
-    if (i === 0) input.checked = false;
     label.appendChild(input);
-    label.appendChild(el("span", ` ${status}`));
+    label.appendChild(el("span", " " + status));
     fieldset.appendChild(label);
   });
   form.appendChild(fieldset);
   const noteLabel = el("label", "Note (optional)", "note-label");
-  noteLabel.setAttribute("for", "decision-note");
+  noteLabel.htmlFor = "decision-note";
   const note = el("textarea");
   note.id = "decision-note";
   note.rows = 3;
@@ -851,87 +1240,488 @@ function decisionSection(report, v) {
   form.appendChild(el("span", "Saving adds to the history. Earlier decisions are kept.", "hint"));
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    saveDecision(v, form, submit);
+    const chosen = form.querySelector("input[name=status]:checked");
+    if (chosen === null) {
+      dispatch({ type: "message", text: "Choose reviewed, follow up or no action.", isError: true });
+      return;
+    }
+    dispatch({
+      type: "saveDecision",
+      vin: vehicle.vin,
+      campaignId: vehicle.campaign_id,
+      status: chosen.value,
+      note: note.value.trim(),
+    });
   });
   section.appendChild(form);
-
   if (mine.length > 0) {
     section.appendChild(el("h3", "Decision history"));
     section.appendChild(table(["Date", "Status", "Note"], mine.slice().reverse(),
-      (d) => [el("span", d.decided_on, "nowrap"), statusBadge(d.status), d.note]));
+      (row) => [el("span", row.decided_on, "nowrap"), statusBadge(row.status), row.note]));
   }
   return section;
 }
 
-async function saveDecision(v, form, submit) {
-  const chosen = form.querySelector("input[name=status]:checked");
-  if (chosen === null) {
-    showMessage("Choose reviewed, follow up or no action.", true);
-    return;
+function api(method, path, body) {
+  const options = { method: method, headers: {} };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
   }
-  const body = { vin: v.vin, campaign_id: v.campaign_id, status: chosen.value };
-  const noteText = form.querySelector("textarea").value.trim();
-  if (noteText !== "") body.note = noteText;
-  submit.disabled = true;
-  try {
-    const saved = await api("POST", "/api/decisions", body);
-    if (saved.status !== 201) {
-      showMessage(saved.data.error || "The decision could not be saved.", true);
+  return fetch(path, options).then((response) => response.json().then(
+    (data) => ({ status: response.status, data: data }),
+    () => ({ status: response.status, data: { error: "The server sent an unreadable response." } })
+  ), () => ({ status: 0, data: { error: "Cannot reach the tracker server." } }));
+}
+
+function mountWorkspace(doc, ports) {
+  if (doc === null || typeof doc.getElementById !== "function") {
+    throw new Error("mountWorkspace requires the page document");
+  }
+  if (typeof ports.request !== "function") throw new Error("mountWorkspace requires ports.request");
+  const api = ports.request;
+  requireMounts();
+
+  let state = initialState(location.hash);
+  let paintedFindings = null;
+  let paintedRuns = null;
+  let paintedLens = null;
+  let paintedMatches = null;
+  let detailPin = "";
+  let detailFindings = null;
+  const bars = new Map();
+  const filterControls = new Map();
+
+  function requireMounts() {
+    $("dealer");
+    $("summary");
+    $("stats");
+    $("message");
+    $("input-warning");
+    $("detail");
+    $("export-pdf");
+    $("export-dialog");
+    $("export-form");
+    $("export-cancel");
+    $("export-options");
+    $("print-report");
+    $("day-limit");
+    $("limit-form");
+    $("run-check");
+    $("app");
+    $("nav-flags");
+    $("nav-flagged-repairs");
+    $("nav-data-problems");
+    $("nav-history");
+    $("report");
+    $("findings");
+    $("findings-filters");
+    $("flagged-repairs");
+    $("flagged-filters");
+    $("flagged-repairs-list");
+    $("data-problems");
+    $("data-filters");
+    $("data-issues");
+    $("data-quality");
+    $("issues-band");
+    $("quality-band");
+    $("history");
+    $("history-runs");
+    $("history-filters");
+    $("history-count");
+    $("history-checks");
+    $("history-decisions");
+    $("history-decisions-title");
+  }
+
+  function forgetPaint() {
+    paintedFindings = null;
+    paintedRuns = null;
+    paintedLens = null;
+    paintedMatches = null;
+    detailPin = "";
+    detailFindings = null;
+    bars.clear();
+    filterControls.clear();
+  }
+
+  function dispatch(command) {
+    const outcome = reduce(state, command);
+    if (outcome.state === state && outcome.effect === null) return;
+    state = outcome.state;
+    paint(state, outcome.effect);
+    if (state.phase === "ready" && state.cursor !== null) reflectHash(state.cursor);
+    const effect = outcome.effect;
+    if (effect !== null && (effect.type === "fetchReport" || effect.type === "fetchRuns" || effect.type === "postJson")) {
+      runEffect(effect);
+    }
+  }
+
+  function paintBusy(next) {
+    $("run-check").disabled = next.busy;
+    $("limit-form").querySelector("button").disabled = next.busy;
+    const buttons = $("detail").querySelectorAll("button");
+    for (let i = 0; i < buttons.length; i++) buttons[i].disabled = next.busy;
+  }
+
+  function paintNav(cursor) {
+    for (const lens of LENS_CATALOG) {
+      const link = $(lens.navId);
+      link.href = hashFor(lens.id, cursor.pin);
+      link.classList.toggle("active", lens.id === cursor.lensId);
+    }
+  }
+
+  function bandAllows(lens, pane, query) {
+    if (lens.id !== "dataProblems" || query.band === "") return true;
+    return pane.id === query.band;
+  }
+
+  function paintPane(lens, pane, index, query, indexes) {
+    const mount = $(pane.mountId);
+    if (!bandAllows(lens, pane, query)) {
+      if (pane.bandId) $(pane.bandId).hidden = true;
+      mount.replaceChildren();
       return;
     }
-    // Reload the saved report so the new decision shows with the old ones.
-    const fresh = await api("GET", "/api/report");
-    if (fresh.status === 200) {
-      render(fresh.data);
-      showMessage("Decision saved.", false);
-    } else {
-      showMessage("The decision was saved, but the report could not be reloaded.", true);
+    if (pane.bandId) $(pane.bandId).hidden = false;
+    const rows = pane.ordered(index);
+    let shownIndexes = indexes;
+    let shown = indexes.length;
+    // The sentence still names every match. The cap is only how many rows are built.
+    if (pane.id === "checks") {
+      shown = Math.min(indexes.length, CHECK_ROW_CAP);
+      shownIndexes = indexes.slice(0, shown);
     }
-  } finally {
-    submit.disabled = false;
+    if (typeof pane.count === "function") {
+      $("history-count").textContent = pane.count(shown, indexes.length, index.historyNewest.length);
+    }
+    if (pane.id === "decisions") {
+      $("history-decisions-title").textContent = "Coordinator decisions (" + indexes.length + ")";
+    }
+    if (shownIndexes.length === 0) {
+      mount.replaceChildren(empty(rows.length === 0 ? pane.emptySource : pane.emptyMatch));
+      return;
+    }
+    const picked = shownIndexes.map((i) => rows[i]);
+    mount.replaceChildren(table(pane.columns, picked, (row) => pane.cells(row, index, lens.id)));
   }
-}
 
-function busy(isBusy) {
-  $("run-check").disabled = isBusy;
-  $("limit-form").querySelector("button").disabled = isBusy;
-}
-
-async function handle(promise) {
-  busy(true);
-  try {
-    const { status, data } = await promise;
-    if (status === 200 || status === 201) render(data);
-    // A file problem (422) hides every finding. Other errors leave the screen as it is.
-    else if (status === 422) showError(data.error);
-    else showMessage(data.error || "The action could not be completed.", true);
-  } finally {
-    busy(false);
+  function paintRuns(index) {
+    const box = $("history-runs");
+    const runs = index.runs;
+    if (runs.phase === "loading") {
+      box.replaceChildren(empty("Loading saved runs\u2026"));
+      return;
+    }
+    if (runs.phase === "failed") {
+      box.replaceChildren(empty(runs.message));
+      return;
+    }
+    if (runs.phase !== "ready") throw new Error("unknown runs phase " + runs.phase);
+    const rows = runs.rows.slice().reverse();
+    box.replaceChildren(rows.length === 0
+      ? empty("No saved runs.")
+      : table(["Run", "Check date", "Repair day limit", "Data load (ingest)"], rows,
+        (row) => [row.run_id, row.check_date, row.day_limit, row.ingest_id]));
   }
-}
 
-async function load() {
-  const { status, data } = await api("GET", "/api/report");
-  if (status === 200) render(data);
-  else if (status === 400) showNoCheckYet();
-  else showError(data.error || "The report could not be loaded.");
-}
-
-$("export-pdf").addEventListener("click", openExportDialog);
-$("export-form").addEventListener("submit", (event) => { event.preventDefault(); exportPdf(); });
-$("export-cancel").addEventListener("click", () => $("export-dialog").close());
-$("run-check").addEventListener("click", () => handle(api("POST", "/api/checks", {})));
-
-$("limit-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const value = Number($("day-limit").value);
-  if (!Number.isInteger(value) || value < 1) {
-    showMessage("The repair day limit must be a whole number of 1 or more.", true);
-    return;
+  function distinctValues(lens, prop, index) {
+    const seen = new Set();
+    const values = [];
+    for (const pane of lens.panes) {
+      for (const row of pane.ordered(index)) {
+        const value = row[prop];
+        if (value === null || value === undefined || value === "") continue;
+        const token = String(value);
+        if (seen.has(token)) continue;
+        seen.add(token);
+        values.push(value);
+      }
+    }
+    values.sort((left, right) => {
+      if (typeof left === "number" && typeof right === "number") return left - right;
+      const a = String(left);
+      const b = String(right);
+      if (a < b) return -1;
+      if (a > b) return 1;
+      return 0;
+    });
+    return values;
   }
-  handle(api("POST", "/api/day-limit", { day_limit: value }));
-});
 
-window.addEventListener("hashchange", route);
-$("dealer").textContent = DEALERSHIP_NAME;
-load();
+  function optionPairs(field, lens, index, selected) {
+    if (field.control === "enum") {
+      return Object.keys(field.labels).map((value) => [value, field.labels[value]]);
+    }
+    const options = [["", "Any"]];
+    const seen = new Set();
+    distinctValues(lens, field.prop, index).forEach((value) => {
+      const token = String(value);
+      seen.add(token);
+      options.push([token, token]);
+    });
+    if (selected !== "" && !seen.has(selected)) options.push([selected, selected]);
+    return options;
+  }
+
+  function buildFilters(lens, query, index) {
+    const bar = el("div", null, "filters");
+    const controls = {};
+    for (const field of lens.fields) {
+      let control;
+      if (field.control === "search" || field.control === "date") {
+        control = el("input");
+        control.type = field.control === "date" ? "date" : "search";
+        if (field.placeholder) control.placeholder = field.placeholder;
+      } else {
+        control = el("select");
+        optionPairs(field, lens, index, query[field.key]).forEach(([value, text]) => {
+          const option = el("option", text);
+          option.value = value;
+          control.appendChild(option);
+        });
+      }
+      control.value = query[field.key];
+      const listen = field.control === "search" || field.control === "date" ? "input" : "change";
+      control.addEventListener(listen, () => {
+        dispatch({ type: "query", lensId: lens.id, patch: { [field.key]: control.value } });
+      });
+      controls[field.key] = control;
+      const wrap = el("label", null, "filter");
+      wrap.appendChild(el("span", field.label));
+      wrap.appendChild(control);
+      bar.appendChild(wrap);
+    }
+    const clear = el("button", "Clear filters", "secondary");
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+      dispatch({ type: "query", lensId: lens.id, patch: emptyQuery(lens) });
+    });
+    bar.appendChild(clear);
+    $(lens.filtersId).replaceChildren(bar);
+    filterControls.set(lens.id, controls);
+    bars.set(lens.id, index.findings);
+  }
+
+  function syncFilters(lens, query) {
+    const controls = filterControls.get(lens.id);
+    if (controls === undefined) throw new Error("missing filters for " + lens.id);
+    for (const field of lens.fields) {
+      const control = controls[field.key];
+      if (document.activeElement !== control && control.value !== query[field.key]) {
+        control.value = query[field.key];
+      }
+    }
+  }
+
+  function paintDetail(index, cursor) {
+    const root = $("detail");
+    if (cursor.pin === null) {
+      root.hidden = true;
+      root.replaceChildren();
+      detailPin = "";
+      detailFindings = null;
+      return;
+    }
+    const pinKey = vehicleKey(cursor.pin.vin, cursor.pin.campaignId);
+    root.hidden = false;
+    if (detailPin === pinKey && detailFindings === index.findings) return;
+    detailPin = pinKey;
+    detailFindings = index.findings;
+    fillDetail(index, cursor.pin, cursor.lensId, dispatch);
+  }
+
+  function paint(next, effect) {
+    if (next.phase !== "ready" || next.index === null || next.cursor === null) {
+      forgetPaint();
+      if (next.phase === "empty") showNoCheckYet();
+      else if (next.phase === "fault") showError(next.message || "The report could not be loaded.");
+      else {
+        hideWork();
+        $("export-pdf").disabled = true;
+        $("input-warning").hidden = true;
+        if (next.message === null) clearMessage();
+        else showMessage(next.message, next.messageIsError);
+      }
+      paintBusy(next);
+      return;
+    }
+    const index = next.index;
+    const cursor = next.cursor;
+    const lens = lensById(cursor.lensId);
+    const reportChanged = paintedFindings !== index.findings;
+    if (reportChanged) {
+      paintedFindings = index.findings;
+      render(index);
+    }
+    $("app").classList.toggle("is-split", cursor.pin !== null);
+    paintNav(cursor);
+    if (reportChanged || paintedLens !== lens.id) {
+      for (const entry of LENS_CATALOG) {
+        if (entry.id === lens.id) continue;
+        for (const pane of entry.panes) $(pane.mountId).replaceChildren();
+        if (entry.runsMountId) $(entry.runsMountId).replaceChildren();
+      }
+      if (lens.id !== "history") paintedRuns = null;
+    }
+    for (const entry of LENS_CATALOG) $(entry.regionId).hidden = entry.id !== lens.id;
+    const query = cursor.queries[lens.id];
+    if (bars.get(lens.id) !== index.findings) buildFilters(lens, query, index);
+    else syncFilters(lens, query);
+    const tablesChanged = reportChanged || paintedLens !== lens.id || paintedMatches !== cursor.matches;
+    if (tablesChanged) {
+      for (const pane of lens.panes) {
+        const indexes = cursor.matches[pane.id];
+        if (indexes === undefined) throw new Error("missing matches for " + pane.id);
+        paintPane(lens, pane, index, query, indexes);
+      }
+      paintedLens = lens.id;
+      paintedMatches = cursor.matches;
+    }
+    if (lens.runsMountId) {
+      if (paintedRuns !== index.runs) {
+        paintRuns(index);
+        paintedRuns = index.runs;
+      }
+    }
+    paintDetail(index, cursor);
+    if (next.message === null) clearMessage();
+    else showMessage(next.message, next.messageIsError);
+    paintBusy(next);
+    if (effect !== null && effect.type === "print") startPrint(index, Object.assign({}, next.exportChoice));
+  }
+
+  function fillExportOptions() {
+    if (state.index === null) throw new Error("export requires a report");
+    const box = $("export-options");
+    box.replaceChildren();
+    exportParts(state.index).forEach(([key, label, hint]) => {
+      const row = el("label", null, "export-option");
+      const input = el("input");
+      input.type = "checkbox";
+      input.checked = state.exportChoice[key];
+      input.addEventListener("change", () => {
+        dispatch({ type: "exportChoice", key: key, checked: input.checked });
+      });
+      const text = el("span");
+      text.appendChild(el("strong", label));
+      text.appendChild(el("span", hint, "hint"));
+      row.appendChild(input);
+      row.appendChild(text);
+      box.appendChild(row);
+    });
+  }
+
+  async function startPrint(index, choice) {
+    const button = $("export-pdf");
+    button.disabled = true;
+    try {
+      let runs = null;
+      if (choice.runs) {
+        const saved = await api("GET", "/api/runs");
+        runs = saved.status === 200 && Array.isArray(saved.data.runs) ? saved.data.runs : null;
+      }
+      buildPrintReport(index, runs, choice);
+      const title = document.title;
+      document.title = "Recall report " + index.checkDate + " run " + index.runId;
+      window.addEventListener("afterprint", () => { document.title = title; }, { once: true });
+      window.print();
+    } finally {
+      const current = state.index;
+      button.disabled = state.phase !== "ready" || current === null ||
+        (current.inputCheck !== undefined && current.inputCheck !== null && current.inputCheck.state === "unusable");
+    }
+  }
+
+  async function runEffect(effect) {
+    if (effect.type === "fetchReport") {
+      const fresh = await api("GET", "/api/report");
+      if (effect.notice && fresh.status !== 200) {
+        dispatch({ type: "report", epoch: effect.epoch, status: fresh.status, data: fresh.data });
+        dispatch({
+          type: "message",
+          text: "The decision was saved, but the report could not be reloaded.",
+          isError: true,
+        });
+        return;
+      }
+      dispatch({
+        type: "report",
+        epoch: effect.epoch,
+        status: fresh.status,
+        data: fresh.data,
+        notice: effect.notice || null,
+      });
+      return;
+    }
+    if (effect.type === "fetchRuns") {
+      const saved = await api("GET", "/api/runs");
+      dispatch({ type: "runs", epoch: effect.epoch, status: saved.status, data: saved.data });
+      return;
+    }
+    if (effect.type === "postJson") {
+      let saved;
+      if (effect.path === "/api/checks") saved = await api("POST", "/api/checks", effect.body);
+      else if (effect.path === "/api/day-limit") saved = await api("POST", "/api/day-limit", effect.body);
+      else if (effect.path === "/api/decisions") saved = await api("POST", "/api/decisions", effect.body);
+      else throw new Error("illegal post " + effect.path);
+      if (effect.accept === "report") {
+        dispatch({ type: "report", epoch: effect.epoch, status: saved.status, data: saved.data });
+        return;
+      }
+      if (effect.accept === "thenReload") {
+        if (saved.status !== 201) {
+          dispatch({
+            type: "message",
+            text: errorText(saved.data, "The decision could not be saved."),
+            isError: true,
+          });
+          return;
+        }
+        dispatch({ type: "reload", notice: "Decision saved." });
+        return;
+      }
+      throw new Error("illegal post result " + effect.accept);
+    }
+    throw new Error("paint owns effect " + effect.type);
+  }
+
+  function wire() {
+    $("dealer").textContent = DEALERSHIP_NAME;
+    window.addEventListener("hashchange", () => dispatch({ type: "navigate", hash: location.hash }));
+    $("run-check").addEventListener("click", () => dispatch({ type: "runCheck" }));
+    $("limit-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = Number($("day-limit").value);
+      if (!Number.isInteger(value) || value < 1) {
+        dispatch({
+          type: "message",
+          text: "The repair day limit must be a whole number of 1 or more.",
+          isError: true,
+        });
+        return;
+      }
+      dispatch({ type: "dayLimit", dayLimit: value });
+    });
+    $("export-pdf").addEventListener("click", () => {
+      if (state.phase !== "ready" || state.index === null) {
+        dispatch({ type: "message", text: "There is no report to export. Run a check first.", isError: true });
+        return;
+      }
+      fillExportOptions();
+      $("export-dialog").showModal();
+    });
+    $("export-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      $("export-dialog").close();
+      dispatch({ type: "export" });
+    });
+    $("export-cancel").addEventListener("click", () => $("export-dialog").close());
+  }
+
+  wire();
+  dispatch({ type: "boot" });
+}
+
+mountWorkspace(document, { request: api });

@@ -17,13 +17,7 @@
     </div>
   </header>
 
-  <main>
-    <nav class="views" aria-label="Views">
-      <a id="nav-flags" class="active" href="#">Flags</a>
-      <a id="nav-flagged-repairs" href="#/flagged-repairs">Flagged repairs</a>
-      <a id="nav-history" href="#/history">Check history</a>
-    </nav>
-
+  <main id="app">
     <section class="controls" aria-label="Check controls">
       <form id="limit-form">
         <label for="day-limit">Repair day limit</label>
@@ -38,35 +32,60 @@
     </section>
 
     <div id="input-warning" class="warning" role="alert" hidden></div>
-
     <div id="message" role="alert" hidden></div>
+    <div id="stats" class="stats" aria-label="Summary" hidden></div>
 
-    <div id="detail" hidden></div>
+    <div class="workspace">
+      <div class="list-pane">
+        <nav class="views" aria-label="Views">
+          <a id="nav-flags" class="active" href="#">Flags</a>
+          <a id="nav-flagged-repairs" href="#/flagged-repairs">Flagged repairs</a>
+          <a id="nav-data-problems" href="#/data-problems">Data problems</a>
+          <a id="nav-history" href="#/history">Check history</a>
+        </nav>
 
-    <div id="history" hidden></div>
+        <section id="report" aria-labelledby="findings-title" hidden>
+          <h2 id="findings-title">Findings</h2>
+          <div id="findings-filters"></div>
+          <div id="findings"></div>
+        </section>
 
-    <section id="flagged-repairs" aria-labelledby="flagged-repairs-title" hidden>
-      <h2 id="flagged-repairs-title">Flagged repairs</h2>
-      <p class="section-note">Repair on an unaffected vehicle: the vehicle model does not match the campaign, or its build date falls outside the campaign’s inclusive date range.</p>
-      <div id="flagged-repairs-list"></div>
-    </section>
+        <section id="flagged-repairs" aria-labelledby="flagged-repairs-title" hidden>
+          <h2 id="flagged-repairs-title">Flagged repairs</h2>
+          <p class="section-note">Repair on an unaffected vehicle: the vehicle model does not match the campaign, or its build date falls outside the campaign’s inclusive date range.</p>
+          <div id="flagged-filters"></div>
+          <div id="flagged-repairs-list"></div>
+        </section>
 
-    <div id="report" hidden>
-      <div id="stats" class="stats" aria-label="Summary"></div>
+        <section id="data-problems" class="data-section" aria-labelledby="data-title" hidden>
+          <h2 id="data-title">Missing and bad data</h2>
+          <p class="section-note">These are data problems, not findings. A row listed here is never treated as "not notified".</p>
+          <div id="data-filters"></div>
+          <div id="issues-band">
+            <h3 id="issues-title">Data issues</h3>
+            <div id="data-issues"></div>
+          </div>
+          <div id="quality-band">
+            <h3 id="quality-title">Vehicle data-quality flags</h3>
+            <div id="data-quality"></div>
+          </div>
+        </section>
 
-      <section aria-labelledby="findings-title">
-        <h2 id="findings-title">Findings</h2>
-                <div id="findings"></div>
-      </section>
+        <section id="history" hidden>
+          <h2>Check history</h2>
+          <p class="section-note">Every saved check and every coordinator decision. Nothing here reruns a check or changes a record.</p>
+          <h3>Saved runs</h3>
+          <div id="history-runs"></div>
+          <h3>Findings checked over time</h3>
+          <div id="history-filters"></div>
+          <p id="history-count" class="hint filter-count"></p>
+          <div id="history-checks"></div>
+          <h3 id="history-decisions-title">Coordinator decisions (0)</h3>
+          <div id="history-decisions"></div>
+        </section>
+      </div>
 
-      <section class="data-section" aria-labelledby="data-title">
-        <h2 id="data-title">Missing and bad data</h2>
-        <p class="section-note">These are data problems, not findings. A row listed here is never treated as "not notified".</p>
-        <h3 id="issues-title">Data issues</h3>
-        <div id="data-issues"></div>
-        <h3 id="quality-title">Vehicle data-quality flags</h3>
-        <div id="data-quality"></div>
-      </section>
+      <div id="detail" hidden></div>
     </div>
 
     <dialog id="export-dialog" aria-labelledby="export-title">

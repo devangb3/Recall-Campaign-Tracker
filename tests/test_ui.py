@@ -282,8 +282,8 @@ def test_flags_page_lists_what_the_report_holds(site, run):
     assert f"run {run['run_id']}" in header
     assert f"repair limit {report['day_limit']} days" in header
     assert page.body_rows("findings") == len(report["findings"])
-    assert page.body_rows("data-issues") == len(report["data_issues"])
-    assert page.body_rows("data-quality") == len(report["data_quality"])
+    assert page.is_hidden("data-problems")
+    assert page.is_hidden("detail")
     stats = page.words("stats")
     kinds = [f["kind"] for f in report["findings"]]
     assert f"{kinds.count('notification')} Notification findings" in stats
@@ -305,6 +305,26 @@ def test_a_new_database_says_no_check_has_run(empty_site):
     assert "No check has been run yet" in page.words("message")
     assert page.is_hidden("report")
     assert "disabled" in page.attrs["export-pdf"]
+
+
+@needs_chrome
+def test_data_problems_lists_issues_and_quality(site, run):
+    report = run["report"]
+    page = render(site, "#/data-problems")
+    assert not page.is_hidden("data-problems")
+    assert page.is_hidden("report")
+    assert page.body_rows("data-issues") == len(report["data_issues"])
+    assert page.body_rows("data-quality") == len(report["data_quality"])
+
+
+@needs_chrome
+def test_open_vehicle_stays_beside_the_findings_list(site, run):
+    view = next(v for v in run["report"]["vehicles"] if v["vin"] and v["campaign_id"])
+    page = render(site, vehicle_route(view))
+    assert not page.is_hidden("detail")
+    assert not page.is_hidden("report")
+    assert view["vin"] in page.words("detail")
+    assert page.body_rows("findings") == len(run["report"]["findings"])
 
 
 @needs_chrome
@@ -371,7 +391,7 @@ def test_dates_in_reasons_show_as_iso_and_invalid_ones_stay(site, run):
     iso, us = real_dates(flag["reason"])[0]
     text = render(site, f"#/vehicle/{flag['vin']}/{flag['campaign_id']}").words("detail")
     assert iso in text and us not in text
-    assert iso in render(site).words("data-quality")
+    assert iso in render(site, "#/data-problems").words("data-quality")
 
     # A value that is not a real date is the problem, so it stays as written.
     known = {(v["vin"], v["campaign_id"]) for v in report["vehicles"]}

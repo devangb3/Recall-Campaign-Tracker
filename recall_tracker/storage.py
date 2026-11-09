@@ -20,6 +20,8 @@ from .contract import (
     NoticeSent, RepairDone, ReportPayload, VehicleView, history_row, to_dict,
 )
 from .contract.validate import require_day_limit
+from .contract.facts import Campaign, Vehicle
+from .migrations import expand_check
 
 
 _SCHEMA = (
@@ -42,7 +44,7 @@ _SCHEMA = (
         campaign_id TEXT NOT NULL,
         check_date TEXT NOT NULL,
         kind TEXT NOT NULL CHECK (
-            kind IN ('notification', 'repair', 'data quality')),
+            kind IN ('notification', 'repair', 'data quality', 'unaffected repair')),
         reason TEXT NOT NULL,
         day_limit INTEGER NOT NULL CHECK (day_limit > 0)
     )""",
@@ -106,6 +108,7 @@ def _date(value: Any) -> date:
 
 
 def _facts(value: Mapping[str, Any], vin: str, campaign: str) -> Facts:
+    vehicle_row, campaign_row = value.get("vehicle"), value.get("campaign")
     return Facts(
         vin, campaign,
         affected=tuple(AffectedVehicle(**row) for row in value["affected"]),
@@ -115,6 +118,11 @@ def _facts(value: Mapping[str, Any], vin: str, campaign: str) -> Facts:
         repairs=tuple(RepairDone(
             row["vin"], row["campaign_id"], _date(row["repair_date"]))
             for row in value["repairs"]),
+        vehicle=None if vehicle_row is None else Vehicle(
+            vehicle_row["vin"], vehicle_row["model"], _date(vehicle_row["build_date"])),
+        campaign=None if campaign_row is None else Campaign(
+            campaign_row["campaign_id"], campaign_row["model"],
+            _date(campaign_row["start_date"]), _date(campaign_row["end_date"])),
     )
 
 
@@ -170,6 +178,7 @@ def report_from_dict(value: Mapping[str, Any]) -> ReportPayload:
             history=tuple(_history(row) for row in value["history"]),
             vehicles=vehicles,
             data_issues=tuple(DataIssue(**row) for row in value["data_issues"]),
+            flagged_repairs=tuple(_finding(row) for row in value.get("flagged_repairs", [])),
         )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ContractError(f"Stored report is invalid: {exc}") from exc
@@ -189,6 +198,7 @@ class CheckStore:
 
     def initialize(self) -> None:
         # executescript would implicitly commit the caller's transaction.
+        expand_check(self.con, "check_history", "unaffected repair", _SCHEMA[2])
         for statement in _SCHEMA:
             self.con.execute(statement)
 
@@ -259,7 +269,7 @@ class CheckStore:
         run_id = cursor.lastrowid
         # report.history can contain earlier runs. Only this run's findings
         # are new rows; repeated checks are kept under their own run_id.
-        for finding in report.findings + report.data_quality:
+        for finding in report.findings + report.data_quality + report.flagged_repairs:
             row = history_row(finding, report.day_limit)
             self.con.execute(
                 "INSERT INTO check_history "

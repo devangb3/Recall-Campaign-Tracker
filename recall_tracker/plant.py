@@ -294,7 +294,7 @@ def data_issue_rows(rng: random.Random, vins, as_of: date) -> list:
     # Repair for a vehicle that is not in the affected file.
     v = vins.new()
     cid = rng.choice(CAMPAIGN_IDS)
-    rows.append(_repair(v, cid, past(30, 200), tag, issue=_issue(
+    rows.append(_repair(v, cid, past(30, 200), "case:unaffected_repair", issue=_issue(
         "NOT_IN_AFFECTED", "", "kept",
         f"VIN {v} is not listed as affected by campaign {cid}.")))
     return rows

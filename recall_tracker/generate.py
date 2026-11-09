@@ -1,10 +1,12 @@
 """Generate synthetic dealership CSVs for the recall campaign tracker.
 
-One fictional dealership, three files:
+One fictional dealership, five files:
 
 * affected_vehicles.csv: vin, campaign_id
 * notices_sent.csv:      vin, campaign_id, notice_date
 * repairs_done.csv:      vin, campaign_id, repair_date, tech_note
+* vehicles.csv:          vin, model, build_date
+* campaigns.csv:         campaign_id, model, start_date, end_date
 
 Everything is made up by this script. VINs start with SYN (no real maker
 uses it) and carry a valid check digit. Dates are written MM/DD/YYYY, the
@@ -31,9 +33,10 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from . import plant
+from .normalize import normalize_vin
 from .vin import VIN_CHARS, with_check_digit
 
-GENERATOR_VERSION = "0.2.0"
+GENERATOR_VERSION = "0.3.0"
 DEFAULT_SEED = 42
 DEFAULT_AS_OF = date(2026, 11, 1)
 DEFAULT_VEHICLES = 500
@@ -41,6 +44,8 @@ DEFAULT_VEHICLES = 500
 AFFECTED_FILE = "affected_vehicles.csv"
 NOTICES_FILE = "notices_sent.csv"
 REPAIRS_FILE = "repairs_done.csv"
+VEHICLES_FILE = "vehicles.csv"
+CAMPAIGNS_FILE = "campaigns.csv"
 MESS_LOG_FILE = "planted_issues.csv"
 MESS_LOG_COLUMNS = ["file", "row_num", "column", "issue_code", "action",
                     "reason"]
@@ -50,6 +55,8 @@ COLUMNS = {
     AFFECTED_FILE: ["vin", "campaign_id"],
     NOTICES_FILE: ["vin", "campaign_id", "notice_date"],
     REPAIRS_FILE: ["vin", "campaign_id", "repair_date", "tech_note"],
+    VEHICLES_FILE: ["vin", "model", "build_date"],
+    CAMPAIGNS_FILE: ["campaign_id", "model", "start_date", "end_date"],
 }
 
 # Campaign id -> (first notice date, last notice date). Notices for each
@@ -190,15 +197,34 @@ def generate(seed: int = DEFAULT_SEED, as_of: date = DEFAULT_AS_OF,
     by_file: dict[str, list[Row]] = {f: [] for f in COLUMNS}
     for row in background + planted:
         by_file[row.file].append(row)
-    for name in COLUMNS:
+    for name in (AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE):
         by_file[name] = plant.order_rows(rng, by_file[name])
         plant.attach_linked_issues(name, by_file[name])
+    # Master data is generated after the original source rows, preserving
+    # the existing three CSVs byte for byte for a given seed.
+    models = {}
+    for name in (AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE):
+        for row in by_file[name]:
+            vin = normalize_vin(row.values["vin"])
+            if vin.ok:
+                models.setdefault(vin.value, "SYN SEDAN")
+                if row.tag == "case:unaffected_repair":
+                    models[vin.value] = "SYN UTILITY"
+    for _ in range(3):
+        models[vins.new()] = "SYN UTILITY"  # inventory without a repair
+    by_file[VEHICLES_FILE] = [Row(VEHICLES_FILE, {
+        "vin": vin, "model": model, "build_date": "01/01/2024"})
+        for vin, model in models.items()]
+    by_file[CAMPAIGNS_FILE] = [Row(CAMPAIGNS_FILE, {
+        "campaign_id": cid, "model": "SYN SEDAN",
+        "start_date": f"01/01/{rng.randint(2020, 2023)}", "end_date": "12/31/2024"})
+        for cid in CAMPAIGNS]
     return by_file
 
 
 def write_outputs(by_file: dict[str, list[Row]], out_dir: Path, seed: int,
                   as_of: date) -> dict:
-    """Write the three CSVs, planted_issues.csv and manifest.json.
+    """Write the five CSVs, planted_issues.csv and manifest.json.
 
     Return the manifest.
     """

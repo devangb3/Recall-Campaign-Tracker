@@ -72,7 +72,7 @@ def test_every_issue_code_is_planted(mess_log, code):
     assert log_rows(mess_log, code)
 
 
-@pytest.mark.parametrize("code", sorted(set(ACTION_FOR) - {"DUPLICATE_ROW"}))
+@pytest.mark.parametrize("code", sorted(set(ACTION_FOR) - {"DUPLICATE_ROW", "NOT_IN_AFFECTED"}))
 def test_each_issue_code_planted_at_least_3_times(mess_log, code):
     assert len(log_rows(mess_log, code)) >= 3
 
@@ -102,8 +102,8 @@ def test_log_row_numbers_are_inside_the_file(files, mess_log):
                for r in mess_log)
 
 
-@pytest.mark.parametrize("file", list(gen.COLUMNS))
-def test_each_file_has_planted_issues(mess_log, file):
+@pytest.mark.parametrize("file", [gen.AFFECTED_FILE, gen.NOTICES_FILE, gen.REPAIRS_FILE])
+def test_each_dealership_file_has_planted_issues(mess_log, file):
     assert any(r["file"] == file for r in mess_log)
 
 
@@ -227,7 +227,7 @@ def test_repair_before_notice_is_before_earliest_notice(files, mess_log):
 
 
 @pytest.mark.parametrize("file", [gen.NOTICES_FILE, gen.REPAIRS_FILE])
-def test_not_in_affected_planted_in_each_dated_file(mess_log, file):
+def test_not_in_affected_planted_for_notices_and_repairs(mess_log, file):
     assert any(r["file"] == file for r in log_rows(mess_log, "NOT_IN_AFFECTED"))
 
 
@@ -298,7 +298,7 @@ def test_day_61_example_is_61_days_inclusive():
     assert (plant.DAY61_REPAIR - plant.DAY60_NOTICE).days + 1 == 61
 
 
-def test_business_case_rows_are_not_in_mess_log(data_dir, mess_log):
+def test_only_unaffected_repair_case_has_a_data_issue(data_dir, mess_log):
     by_file = gen.generate(**({"seed": 7, "n_vehicles": 60}
                               if "seed7" in str(data_dir)
                               else {"seed": 42, "n_vehicles": 500}),
@@ -307,7 +307,11 @@ def test_business_case_rows_are_not_in_mess_log(data_dir, mess_log):
                  for n, r in enumerate(rows, start=2)
                  if r.tag.startswith("case:")}
     logged = {(r["file"], int(r["row_num"])) for r in mess_log}
-    assert case_rows & logged == set()
+    outside_repairs = {(f, n) for f, rows in by_file.items()
+                       for n, r in enumerate(rows, start=2)
+                       if r.tag == "case:unaffected_repair"}
+    assert len(outside_repairs) == 1
+    assert case_rows & logged == outside_repairs
 
 
 # ---- hostile tech note --------------------------------------------------
@@ -334,7 +338,7 @@ def test_hostile_note_vehicle_is_affected_and_notified(files):
 
 # ---- safe mess ----------------------------------------------------------
 def all_vins(files):
-    return [r["vin"] for f in gen.COLUMNS for r in files[f]]
+    return [r["vin"] for f, cols in gen.COLUMNS.items() if "vin" in cols for r in files[f]]
 
 
 def test_safe_mess_lower_case_vin_present(full_dir):
@@ -353,7 +357,7 @@ def test_safe_mess_vin_with_hyphens_present(full_dir):
 
 
 def test_safe_mess_loose_campaign_present(full_dir):
-    raws = [r["campaign_id"] for f in gen.COLUMNS
+    raws = [r["campaign_id"] for f, cols in gen.COLUMNS.items() if "campaign_id" in cols
             for r in read_csv(full_dir / f)]
     assert any(ref_campaign(c) and c not in gen.CAMPAIGNS for c in raws)
 
@@ -373,7 +377,7 @@ def test_safe_mess_only_touches_background_rows():
 
 def test_safe_mess_rows_are_never_flagged(files, mess_log):
     logged = {(r["file"], int(r["row_num"])) for r in mess_log}
-    messy = {(f, n) for f in gen.COLUMNS
+    messy = {(f, n) for f, cols in gen.COLUMNS.items() if "campaign_id" in cols
              for n, r in enumerate(files[f], start=2)
              if r["campaign_id"] not in gen.CAMPAIGNS
              and ref_campaign(r["campaign_id"])}

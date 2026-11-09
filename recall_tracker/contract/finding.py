@@ -13,6 +13,7 @@ from .validate import ContractError, require_date, require_text
 class FindingKind(Enum):
     NOTIFICATION = "notification"
     REPAIR = "repair"
+    UNAFFECTED_REPAIR = "unaffected repair"
     DATA_QUALITY = "data quality"
 
 
@@ -32,7 +33,7 @@ class Finding:
         require_text(self.campaign_id, "campaign_id")
         if type(self.kind) is not FindingKind:
             raise ContractError(
-                "kind must be notification, repair, or data quality")
+                "kind must be notification, repair, data quality, or unaffected repair")
         require_text(self.reason, "reason")
         require_date(self.check_date, "check date")
         if type(self.facts) is not Facts:

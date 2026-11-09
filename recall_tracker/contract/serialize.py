@@ -34,6 +34,8 @@ class FactsDict(TypedDict):
     affected: list[AffectedDict]
     notices: list[NoticeDict]
     repairs: list[RepairDict]
+    vehicle: dict | None
+    campaign: dict | None
 
 
 class FindingDict(TypedDict):
@@ -96,6 +98,7 @@ class ReportDict(TypedDict):
     decisions: list[DecisionDict]
     history: list[HistoryDict]
     vehicles: list[VehicleDict]
+    flagged_repairs: list[FindingDict]
 
 
 def _iso(value: date | None) -> str | None:
@@ -114,6 +117,13 @@ def _facts_dict(facts: Facts) -> FactsDict:
         "repairs": [{"vin": row.vin, "campaign_id": row.campaign_id,
                      "repair_date": row.repair_date.isoformat()}
                     for row in facts.repairs],
+        "vehicle": None if facts.vehicle is None else {
+            "vin": facts.vehicle.vin, "model": facts.vehicle.model,
+            "build_date": facts.vehicle.build_date.isoformat()},
+        "campaign": None if facts.campaign is None else {
+            "campaign_id": facts.campaign.campaign_id, "model": facts.campaign.model,
+            "start_date": facts.campaign.start_date.isoformat(),
+            "end_date": facts.campaign.end_date.isoformat()},
     }
 
 
@@ -159,6 +169,7 @@ def to_dict(payload: ReportPayload) -> ReportDict:
         "check_date": payload.check_date.isoformat(),
         "day_limit": payload.day_limit,
         "findings": [_finding_dict(finding) for finding in payload.findings],
+        "flagged_repairs": [_finding_dict(finding) for finding in payload.flagged_repairs],
         "data_quality": [_finding_dict(finding)
                          for finding in payload.data_quality],
         "data_issues": [_data_issue_dict(issue)

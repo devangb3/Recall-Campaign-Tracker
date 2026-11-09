@@ -18,7 +18,7 @@ browser's print-to-PDF; there is no PDF endpoint.
   [vin.py](../../recall_tracker/vin.py) create deterministic synthetic
   CSVs, deliberate business/data-quality cases, a planted-issue log and a
   manifest containing file hashes and row counts.
-- [ingest.py](../../recall_tracker/ingest.py) reads and validates all three
+- [ingest.py](../../recall_tracker/ingest.py) reads and validates all five
   CSVs, records row issues, handles duplicates and writes accepted rows.
   [normalize.py](../../recall_tracker/normalize.py) owns safe formatting
   fixes and value validation.
@@ -51,16 +51,23 @@ browser's print-to-PDF; there is no PDF endpoint.
 
 ## Inputs and identity
 
-The three input files are:
+The five required input files are:
 
 - `affected_vehicles.csv`: `vin`, `campaign_id`.
 - `notices_sent.csv`: `vin`, `campaign_id`, `notice_date`.
 - `repairs_done.csv`: `vin`, `campaign_id`, `repair_date`, optional `tech_note`.
+- `vehicles.csv`: `vin`, `model`, `build_date`.
+- `campaigns.csv`: `campaign_id`, `model`, `start_date`, `end_date`.
 
 The case key is **VIN plus campaign ID**. One VIN in two campaigns is two
-cases. Affected membership comes entirely from accepted rows of the
-affected file. Manufacturer data, build-date calculations, ownership,
-returns, resales and central-body data are outside the current checks.
+cases. The notification and repair-day checks use accepted rows of the
+supplied affected file. Automatic independent checks accepted repairs using
+vehicle model and build date against campaign model and inclusive production
+boundaries. It emits `unaffected repair` into `flagged_repairs`, displayed in
+**Flagged repairs**, when the model differs or the build date is outside the
+range. Missing/invalid/conflicting masters mean unknown eligibility, reported
+as `ELIGIBILITY_UNAVAILABLE` on the repair; they never prove unaffected status.
+Ownership, returns, resales and central-body data remain outside the checks.
 
 The generator also emits `planted_issues.csv` and `manifest.json`. These
 support reproducibility and tests; the business checks do not use the
@@ -102,8 +109,9 @@ flowchart TD
 5. Load the saved repair-day limit, defaulting to 60, or save an explicitly
    supplied positive integer limit within the same transaction.
 6. Run both business checks against the same affected list. Accepted
-   notice/repair pairs outside that list remain available for quality
-   reporting but never generate business findings.
+   notice/repair pairs outside that list remain available as facts.
+   Independently, check all repaired pairs against the same ingest’s masters
+   using [eligibility.py](../../recall_tracker/eligibility.py).
 7. Assemble the report with current decisions and earlier finding history,
    then append the run and its new history rows.
 8. Commit before returning the saved run. Any failure inside the transaction
@@ -119,16 +127,19 @@ the standalone ingest command.
 Ingest reads cells as text and maps supported header variants to canonical
 columns. Safe fixes include VIN case/spacing, readable campaign-ID variants
 and supported date formats. Accepted dates are stored as `YYYY-MM-DD`.
-Dates after the ingest's as-of date are quarantined.
+Notice, repair and vehicle build dates after the ingest's as-of date are
+quarantined. Campaign production boundaries may be future dates.
 
 Row issues have one of three actions:
 
 - **Quarantined:** `MISSING_VALUE`, `BAD_VIN`, `BAD_CAMPAIGN`, `BAD_DATE` and
-  `FUTURE_DATE`. The whole original row is retained; it is excluded from
+  `FUTURE_DATE`, plus `BAD_DATE_RANGE` (inverted campaign boundaries) and
+  `CONFLICTING_MASTER` (ambiguous master identifiers). The whole original row is retained; it is excluded from
   the accepted source table.
 - **Dropped duplicate:** `DUPLICATE_ROW`. The first accepted pair/date stays.
   Repair-note text is not part of the duplicate key.
-- **Kept:** `DATE_CONFLICT`, `REPAIR_BEFORE_NOTICE` and `NOT_IN_AFFECTED`.
+- **Kept:** `DATE_CONFLICT`, `REPAIR_BEFORE_NOTICE`, `NOT_IN_AFFECTED` (notices and repairs),
+  and `ELIGIBILITY_UNAVAILABLE` (repairs with unusable or absent masters).
   Accepted facts remain available, with a separate reason describing the
   problem. The pipeline creates data-quality findings for kept issues
   whose pair has accepted facts, deduplicating identical pair/reason flags.
@@ -193,13 +204,15 @@ The default database is `data/recall.db`. Two groups of tables share it.
 
 - `ingests` identifies each complete CSV load and retains its timestamps,
   as-of date, source hashes and row counts.
-- `affected_vehicles`, `notices_sent` and `repairs_done` hold accepted rows
+- `affected_vehicles`, `notices_sent`, `repairs_done`, `vehicles` and `campaigns`
+  hold accepted rows
   keyed to an ingest, with source-file and source-row provenance.
 - `data_issues` retains reasons and actions; `quarantine` retains original
   invalid rows. Both belong to an ingest.
 
 The `cur_affected_vehicles`, `cur_notices_sent`, `cur_repairs_done`,
-`cur_data_issues` and `cur_quarantine` views select the latest complete
+`cur_data_issues`, `cur_quarantine`, `cur_vehicles` and `cur_campaigns` views
+select the latest complete
 ingest. Older rows are retained.
 
 **Tool records**, defined in `storage.py`:
@@ -212,6 +225,11 @@ ingest. Older rows are retained.
 - `coordinator_decisions` appends each decision with its pair, status,
   optional note, decision date and save timestamp.
 - `tracker_settings` stores the selected repair-day limit.
+
+[migrations.py](../../recall_tracker/migrations.py) transactionally expands
+issue/history CHECK constraints on older databases, preserving row IDs,
+indexes, views and saved JSON. Old reports lacking metadata or
+`flagged_repairs` still deserialize; an old ingest never borrows new masters.
 
 An **ingest** is a load of source records. A **run** evaluates an ingest
 using a date and limit. Several runs can reference the same ingest; a new
@@ -262,13 +280,16 @@ from `/api/runs/<id>` carry neither.
 
 ## Coordinator UI
 
-`ui/app.js` fetches `GET /api/report` and renders three views from the one
+`ui/app.js` fetches `GET /api/report` and renders four views from the one
 payload, switching by URL hash without a page load:
 
 - **Flags** (`#`): count cards, notification and repair findings (equal
   standing, payload order), and a separate "Missing and bad data" section for
   `data_issues` and `data_quality`. The day-limit form posts to
   `/api/day-limit`; "Run check" posts to `/api/checks`.
+- **Flagged repairs** (`#/flagged-repairs`): automatic unaffected repair flags,
+  with model/date evidence, repair dates and reasons. The same separate section
+  is selectable in PDF export.
 - **Vehicle detail** (`#/vehicle/<vin>/<campaign>`): built from the report's
   `vehicles` entry. A vehicle outside the affected list (`facts.affected`
   empty) shows no day count. The decision form posts `vin`, `campaign_id`,

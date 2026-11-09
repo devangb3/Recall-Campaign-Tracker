@@ -19,7 +19,8 @@ from .validate import ContractError, require_text
 AFFECTED_FILE = "affected_vehicles.csv"
 NOTICES_FILE = "notices_sent.csv"
 REPAIRS_FILE = "repairs_done.csv"
-SOURCE_FILES = frozenset({AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE})
+SOURCE_FILES = frozenset({AFFECTED_FILE, NOTICES_FILE, REPAIRS_FILE,
+                          "vehicles.csv", "campaigns.csv"})
 
 # Code -> the only action REC-18 allows for that code.
 _ACTION_FOR = {
@@ -32,6 +33,9 @@ _ACTION_FOR = {
     "DATE_CONFLICT": "kept",
     "REPAIR_BEFORE_NOTICE": "kept",
     "NOT_IN_AFFECTED": "kept",
+    "BAD_DATE_RANGE": "quarantined",
+    "CONFLICTING_MASTER": "quarantined",
+    "ELIGIBILITY_UNAVAILABLE": "kept",
 }
 
 
@@ -52,7 +56,7 @@ class DataIssue:
         if self.file not in SOURCE_FILES:
             raise ContractError(
                 "file must be affected_vehicles.csv, notices_sent.csv, "
-                "or repairs_done.csv")
+                "repairs_done.csv, vehicles.csv, or campaigns.csv")
         if type(self.src_row) is not int or self.src_row < 2:
             raise ContractError("src_row must be a data row number, 2 or more")
         expected = _ACTION_FOR.get(self.issue_code)

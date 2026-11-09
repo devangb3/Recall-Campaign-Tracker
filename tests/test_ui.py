@@ -430,3 +430,40 @@ def test_matching_files_show_no_warning(site):
     page = render(site)
     assert page.is_hidden("input-warning")
     assert page.words("input-warning") == ""
+
+
+@needs_chrome
+def test_flagged_repairs_tab_shows_evidence_separately(site, run):
+    flags = run["report"]["flagged_repairs"]
+    assert flags
+    page = render(site, "#/flagged-repairs")
+    assert not page.is_hidden("flagged-repairs")
+    assert page.is_hidden("report") and page.is_hidden("history") and page.is_hidden("detail")
+    assert "active" in page.attrs["nav-flagged-repairs"]["class"]
+    assert page.body_rows("flagged-repairs-list") == len(flags)
+    text = page.words("flagged-repairs-list")
+    for flag in flags:
+        assert flag["vin"] in text
+        assert flag["reason"] in text
+        assert flag["facts"]["vehicle"]["build_date"] in text
+        assert flag["facts"]["campaign"]["start_date"] in text
+    assert "Repair on an unaffected vehicle" in text
+
+
+@needs_chrome
+def test_flagged_repair_detail_includes_models_dates_and_flag(site, run):
+    flag = run["report"]["flagged_repairs"][0]
+    page = render(site, vehicle_route(flag))
+    text = page.words("detail")
+    assert flag["reason"] in text
+    assert f"Vehicle model {flag['facts']['vehicle']['model']}" in text
+    assert f"Campaign model {flag['facts']['campaign']['model']}" in text
+    assert "both dates included" in text
+    assert page.is_hidden("flagged-repairs")
+
+
+@needs_chrome
+def test_unchecked_database_hides_flagged_repairs(empty_site):
+    page = render(empty_site, "#/flagged-repairs")
+    assert page.is_hidden("flagged-repairs")
+    assert "No check has been run yet" in page.words("message")

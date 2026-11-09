@@ -11,7 +11,7 @@ from .days import (
     DEFAULT_DAY_LIMIT, inclusive_day_count, is_on_time, notice_date_used,
     repair_date_used, repair_outside_limit)
 from .decision import Decision, current_decision
-from .facts import Facts
+from .facts import Facts, campaign_applies
 from .finding import Finding, FindingKind
 from .history import CheckHistoryRow
 from .validate import (
@@ -63,17 +63,20 @@ class VehicleView:
 
 
 def _split_findings(
-        findings: tuple[Finding, ...]) -> tuple[tuple[Finding, ...], tuple[Finding, ...]]:
-    """Move data quality onto its own list without ranking the other two."""
+        findings: tuple[Finding, ...]) -> tuple[tuple[Finding, ...], tuple[Finding, ...], tuple[Finding, ...]]:
+    """Keep data quality and unaffected repairs on their own lists."""
     flagged: list[Finding] = []
     quality: list[Finding] = []
+    repairs: list[Finding] = []
     for finding in findings:
         if finding.kind is FindingKind.DATA_QUALITY:
             quality.append(finding)
+        elif finding.kind is FindingKind.UNAFFECTED_REPAIR:
+            repairs.append(finding)
         else:
             assert finding.kind in (FindingKind.NOTIFICATION, FindingKind.REPAIR)
             flagged.append(finding)
-    return tuple(flagged), tuple(quality)
+    return tuple(flagged), tuple(quality), tuple(repairs)
 
 
 def _vehicle_view(facts: Facts, check_date: date, day_limit: int,
@@ -121,6 +124,7 @@ class ReportPayload:
     ``history`` keeps every check row. ``vehicles`` is one view per pair
     whose facts were supplied. ``data_issues`` keeps rows that cannot be
     findings, including a quarantined row with no usable vin.
+    ``flagged_repairs`` holds automatic unaffected-repair findings.
     """
 
     check_date: date
@@ -131,6 +135,7 @@ class ReportPayload:
     history: tuple[CheckHistoryRow, ...]
     vehicles: tuple[VehicleView, ...]
     data_issues: tuple[DataIssue, ...] = ()
+    flagged_repairs: tuple[Finding, ...] = ()
 
     def __post_init__(self) -> None:
         require_date(self.check_date, "check date")
@@ -141,12 +146,15 @@ class ReportPayload:
         history = as_tuple(self.history, CheckHistoryRow, "history")
         vehicles = as_tuple(self.vehicles, VehicleView, "vehicles")
         data_issues = as_tuple(self.data_issues, DataIssue, "data_issues")
+        flagged_repairs = as_tuple(self.flagged_repairs, Finding, "flagged_repairs")
         object.__setattr__(self, "findings", findings)
         object.__setattr__(self, "data_quality", quality)
         object.__setattr__(self, "decisions", decisions)
         object.__setattr__(self, "history", history)
         object.__setattr__(self, "vehicles", vehicles)
         object.__setattr__(self, "data_issues", data_issues)
+        object.__setattr__(self, "flagged_repairs", flagged_repairs)
+        self._reject_duplicates("flagged_repairs", flagged_repairs)
         self._reject_duplicates("findings", findings)
         self._reject_duplicates("data_quality", quality)
         self._reject_duplicates("data_issues", data_issues)
@@ -154,7 +162,22 @@ class ReportPayload:
         views = self._views_by_pair(vehicles)
         self._check_findings(findings, views)
         self._check_quality(quality, views)
+        self._check_flagged_repairs(flagged_repairs, views)
         self._check_views(vehicles, quality, decisions, data_issues)
+
+    def _check_flagged_repairs(self, flags: tuple[Finding, ...],
+                               views: dict[tuple[str, str], VehicleView]) -> None:
+        seen: set[tuple[str, str]] = set()
+        for flag in flags:
+            self._require_vehicle(flag, views)
+            key = (flag.vin, flag.campaign_id)
+            if (flag.kind is not FindingKind.UNAFFECTED_REPAIR
+                    or not flag.facts.repairs
+                    or campaign_applies(flag.facts) is not False or key in seen):
+                raise ContractError(
+                    "a flagged repair needs a unique repaired pair "
+                    "outside campaign eligibility")
+            seen.add(key)
 
     def _reject_duplicates(self, field: str, rows: tuple[object, ...]) -> None:
         if len(rows) != len(set(rows)):
@@ -263,7 +286,7 @@ def build_report(check_date: date, vehicles: Sequence[Facts],
     decision_rows = as_tuple(decisions, Decision, "decisions")
     history_rows = as_tuple(history, CheckHistoryRow, "history")
     issue_rows = as_tuple(data_issues, DataIssue, "data_issues")
-    flagged, quality = _split_findings(finding_rows)
+    flagged, quality, repairs = _split_findings(finding_rows)
     views = tuple(
         _vehicle_view(facts, check_date, day_limit, quality, decision_rows,
                       issue_rows)
@@ -277,4 +300,5 @@ def build_report(check_date: date, vehicles: Sequence[Facts],
         history=history_rows,
         vehicles=views,
         data_issues=issue_rows,
+        flagged_repairs=repairs,
     )

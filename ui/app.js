@@ -114,6 +114,7 @@ function showError(text) {
   $("report").hidden = true;
   $("detail").hidden = true;
   $("history").hidden = true;
+  $("flagged-repairs").hidden = true;
   showMessage(text, true);
 }
 
@@ -125,7 +126,8 @@ function showNoCheckYet() {
   $("report").hidden = true;
   $("detail").hidden = true;
   $("history").hidden = true;
-  showMessage("No check has been run yet. Choose “Run check” to load the three CSV files.", false);
+  $("flagged-repairs").hidden = true;
+  showMessage("No check has been run yet. Choose “Run check” to load the five CSV files.", false);
 }
 
 // When the CSV files were last read. Reload and Apply reuse that data, so
@@ -195,6 +197,7 @@ function render(result) {
   stats.replaceChildren();
   [["Notification findings", counts.notification, "notification"],
    ["Repair findings", counts.repair, "repair"],
+   ["Flagged repairs", report.flagged_repairs.length, "repair"],
    ["Data issues", report.data_issues.length, "data"],
    ["Data-quality flags", report.data_quality.length, "data"]].forEach(([label, n, tone]) => {
     const card = el("div", null, `stat ${tone}`);
@@ -206,7 +209,7 @@ function render(result) {
   fill("findings", report.findings.length === 0
     ? empty("No findings in this check.")
     : table(["VIN", "Campaign", "Kind", "Reason"], report.findings, (f) =>
-        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), el("span", f.kind, `kind kind-${f.kind}`), isoDates(f.reason)]));
+        [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), kindBadge(f.kind), isoDates(f.reason)]));
 
   fill("data-issues", report.data_issues.length === 0
     ? empty("No data issues.")
@@ -226,7 +229,26 @@ function render(result) {
     : table(["VIN", "Campaign", "Reason"], report.data_quality, (f) =>
         [vehicleLink(f.vin, f.campaign_id), el("span", f.campaign_id, "nowrap"), isoDates(f.reason)]));
 
+  renderFlaggedRepairs(report);
   route();
+}
+
+function flaggedRepairCells(f, link) {
+  const vehicle = f.facts.vehicle;
+  const campaign = f.facts.campaign;
+  return [link ? vehicleLink(f.vin, f.campaign_id) : el("span", f.vin, "mono"),
+    f.campaign_id, vehicle.model, vehicle.build_date, campaign.model,
+    `${campaign.start_date} to ${campaign.end_date}`, "Repair on an unaffected vehicle",
+    f.facts.repairs.map((r) => r.repair_date).join(", "), f.reason];
+}
+
+const FLAGGED_REPAIR_COLUMNS = ["VIN", "Campaign", "Vehicle model", "Build date",
+  "Campaign model", "Build date range (inclusive)", "Flag", "Repair dates", "Reason"];
+
+function renderFlaggedRepairs(report) {
+  fill("flagged-repairs-list", report.flagged_repairs.length === 0
+    ? empty("No repairs on unaffected vehicles in this check.")
+    : table(FLAGGED_REPAIR_COLUMNS, report.flagged_repairs, (f) => flaggedRepairCells(f, true)));
 }
 
 // ---- Vehicle detail (REC-27) ------------------------------------------------
@@ -239,7 +261,7 @@ const HISTORY_ROW_LIMIT = 500;
 const historyFilters = { vin: "", campaign: "", kind: "", from: "", to: "", decision: "", limit: "" };
 
 function kindBadge(kind) {
-  return el("span", kind, `kind kind-${kind === "data quality" ? "data" : kind}`);
+  return el("span", kind, `kind kind-${kind === "data quality" ? "data" : kind.replaceAll(" ", "-")}`);
 }
 
 // Current decision per vehicle and campaign: latest decided_on, then the
@@ -329,7 +351,7 @@ function renderHistory(report) {
     [all("Any")].concat(distinct(report.history.map((h) => h.campaign_id)).map((c) => [c, c])),
     historyFilters.campaign, set("campaign"))));
   bar.appendChild(filterField("Kind", selectOf(
-    [all("Any"), ["notification", "notification"], ["repair", "repair"], ["data quality", "data quality"]],
+    [all("Any"), ["notification", "notification"], ["repair", "repair"], ["data quality", "data quality"], ["unaffected repair", "Repair on an unaffected vehicle"]],
     historyFilters.kind, set("kind"))));
   bar.appendChild(filterField("Check date from", inputOf("date", historyFilters.from, set("from"))));
   bar.appendChild(filterField("to", inputOf("date", historyFilters.to, set("to"))));
@@ -416,7 +438,7 @@ function newestFirst(rows, field) {
 // Every vehicle with a finding, a data-quality flag or a decision.
 function detailVehicles(report) {
   const flagged = new Set();
-  report.findings.concat(report.data_quality)
+  report.findings.concat(report.data_quality, report.flagged_repairs)
     .forEach((f) => flagged.add(`${f.vin}\u0000${f.campaign_id}`));
   return report.vehicles.filter((v) => flagged.has(`${v.vin}\u0000${v.campaign_id}`) ||
     v.decision !== null || v.data_quality_reasons.length > 0);
@@ -424,11 +446,12 @@ function detailVehicles(report) {
 
 // What the person can switch on or off. "checks" is the long one, so it
 // starts off. The summary at the top is always included.
-const exportChoice = { findings: true, data: true, vehicles: true, runs: true, checks: false, decisions: true };
+const exportChoice = { findings: true, flaggedRepairs: true, data: true, vehicles: true, runs: true, checks: false, decisions: true };
 
 function exportParts(report) {
   return [
     ["findings", "Findings", `${report.findings.length} notification and repair findings`],
+    ["flaggedRepairs", "Flagged repairs", `${report.flagged_repairs.length} repairs on unaffected vehicles`],
     ["data", "Missing and bad data",
       `${report.data_issues.length} data issues and ${report.data_quality.length} vehicle data-quality flags, kept apart`],
     ["vehicles", "Vehicle detail", `${detailVehicles(report).length} vehicles with a finding, a flag or a decision`],
@@ -514,6 +537,7 @@ function buildPrintReport(result, runs, choice) {
   kpis.appendChild(kpi(checked, "Vehicles checked (per campaign)", "total"));
   kpis.appendChild(kpi(counts.notification, "Notification findings", "notification"));
   kpis.appendChild(kpi(counts.repair, "Repair findings", "repair"));
+  kpis.appendChild(kpi(report.flagged_repairs.length, "Flagged repairs", "repair"));
   kpis.appendChild(kpi(report.data_issues.length, "Data issues", "data"));
   kpis.appendChild(kpi(report.data_quality.length, "Data-quality flags", "data"));
   root.appendChild(kpis);
@@ -525,7 +549,14 @@ function buildPrintReport(result, runs, choice) {
     const sec = printSection(root, `Findings (${report.findings.length})`, "tone-findings");
     printTable(sec, ["VIN", "Campaign", "Kind", "Reason"], report.findings,
       (f) => [el("span", f.vin, "mono"), el("span", f.campaign_id, "nowrap"),
-        el("span", f.kind, `kind kind-${f.kind}`), isoDates(f.reason)], "No findings in this check.");
+        kindBadge(f.kind), isoDates(f.reason)], "No findings in this check.");
+  }
+
+  if (choice.flaggedRepairs) {
+    const sec = printSection(root, `Flagged repairs (${report.flagged_repairs.length})`, "tone-findings",
+      "Campaign eligibility requires a matching model and a build date within the inclusive campaign range.");
+    printTable(sec, FLAGGED_REPAIR_COLUMNS, report.flagged_repairs,
+      (f) => flaggedRepairCells(f, false), "No repairs on unaffected vehicles in this check.");
   }
 
   if (choice.data) {
@@ -635,10 +666,13 @@ function route() {
     catch (err) { parts = null; }
   }
   const onHistory = location.hash === "#/history";
-  $("report").hidden = parts !== null || onHistory;
+  const onFlaggedRepairs = location.hash === "#/flagged-repairs";
+  $("report").hidden = parts !== null || onHistory || onFlaggedRepairs;
   $("detail").hidden = parts === null;
   $("history").hidden = !onHistory;
-  $("nav-flags").classList.toggle("active", !onHistory && parts === null);
+  $("flagged-repairs").hidden = !onFlaggedRepairs;
+  $("nav-flagged-repairs").classList.toggle("active", onFlaggedRepairs);
+  $("nav-flags").classList.toggle("active", !onHistory && !onFlaggedRepairs && parts === null);
   $("nav-history").classList.toggle("active", onHistory);
   if (parts !== null) {
     renderDetail(current.report, parts[0], parts[1]);
@@ -722,11 +756,20 @@ function renderDetail(report, vin, campaign) {
   }
   facts.appendChild(fact("Day limit", `${v.day_limit} days`));
   facts.appendChild(fact("Repair result", repairResult(v)));
+  if (v.facts.vehicle) {
+    facts.appendChild(fact("Vehicle model", v.facts.vehicle.model));
+    facts.appendChild(fact("Build date", v.facts.vehicle.build_date));
+  }
+  if (v.facts.campaign) {
+    facts.appendChild(fact("Campaign model", v.facts.campaign.model));
+    facts.appendChild(fact("Campaign build date range",
+      `${v.facts.campaign.start_date} to ${v.facts.campaign.end_date}`, "both dates included"));
+  }
   root.appendChild(facts);
 
   // Notification and repair findings for this pair. Data problems come later, apart from these.
   const pair = sameVehicle(vin, campaign);
-  const found = report.findings.filter(pair);
+  const found = report.findings.concat(report.flagged_repairs).filter(pair);
   root.appendChild(el("h3", "Findings for this vehicle"));
   if (found.length === 0) {
     root.appendChild(empty("No notification or repair finding for this vehicle."));
@@ -734,7 +777,7 @@ function renderDetail(report, vin, campaign) {
     const list = el("ul", null, "reasons");
     found.forEach((f) => {
       const li = el("li");
-      li.appendChild(el("span", f.kind, `kind kind-${f.kind}`));
+      li.appendChild(kindBadge(f.kind));
       li.appendChild(el("span", ` ${isoDates(f.reason)}`));
       list.appendChild(li);
     });

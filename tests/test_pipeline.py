@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import AS_OF
+from conftest import AS_OF, write_master_data
 from recall_tracker import generate, pipeline
 from recall_tracker.contract import (
     ContractError, Decision, DecisionStatus, FindingKind, to_dict)
@@ -69,6 +69,7 @@ def boundary_raw(tmp_path):
             writer = csv.writer(handle)
             writer.writerow(header)
             writer.writerows(values)
+    write_master_data(raw, [r for _, values in rows.values() for r in values])
     return raw
 
 
@@ -147,7 +148,7 @@ def test_generated_seed_locked_cases_and_normalization(seed, size, tmp_path):
             (HOSTILE_NOTE,)).fetchone() == (HOSTILE_NOTE,)
     assert all(len(v.vin) == 17 and v.vin == v.vin.upper()
                for v in run.report.vehicles)
-    assert len(run.report.data_issues) == 27
+    assert len(run.report.data_issues) == 26
     assert all(f.kind is not FindingKind.DATA_QUALITY
                for f in run.report.findings)
     assert run.report.decisions == ()

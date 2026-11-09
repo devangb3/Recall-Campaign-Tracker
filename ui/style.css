@@ -63,7 +63,7 @@ tr:last-child td { border-bottom: 0; }
 
 .kind { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .kind-notification { background: var(--notif-bg); color: var(--notif); }
-.kind-repair { background: var(--repair-bg); color: var(--repair); }
+.kind-repair, .kind-unaffected-repair { background: var(--repair-bg); color: var(--repair); }
 
 .data-section { margin-top: 36px; padding-top: 4px; border-top: 2px dashed #cfd6e3; }
 .data-section h2 { color: var(--data); }
@@ -109,7 +109,7 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 .decision-form textarea:focus, .vin-link:focus-visible, .back:focus-visible { outline: 3px solid rgba(43,108,176,.35); outline-offset: 1px; }
 
 /* Views and check history */
-.views { display: flex; gap: 6px; margin: 4px 0 14px; }
+.views { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 14px; }
 .views a { padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 600; border: 1px solid var(--line); background: var(--panel); }
 .views a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 6px 0 8px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
@@ -153,7 +153,7 @@ button.secondary { background: #fff; color: var(--accent); border: 1px solid var
   .print-meta dt { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; opacity: .8; }
   .print-meta dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
 
-  .print-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 12px; }
+  .print-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
   .print-kpi { padding: 12px 14px; border: 1px solid var(--line); border-top: 5px solid #8896ab; border-radius: 8px; background: #fff; break-inside: avoid; }
   .print-kpi-n { display: block; font-size: 38px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
   .print-kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); font-weight: 600; }

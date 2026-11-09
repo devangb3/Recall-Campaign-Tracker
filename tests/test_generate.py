@@ -171,7 +171,7 @@ def test_no_vehicle_is_in_more_than_two_campaigns(files):
     assert max(len(c) for c in seen.values()) <= 2
 
 
-@pytest.mark.parametrize("name", list(gen.COLUMNS))
+@pytest.mark.parametrize("name", [f for f, cols in gen.COLUMNS.items() if "campaign_id" in cols])
 def test_every_readable_campaign_is_a_known_campaign(files, name):
     found = {ref_campaign(r["campaign_id"]) for r in files[name]} - {None}
     assert found <= CAMPAIGNS
@@ -184,7 +184,7 @@ def test_every_campaign_has_affected_vehicles(files, cid):
 
 
 # ---- synthetic values ---------------------------------------------------
-@pytest.mark.parametrize("name", list(gen.COLUMNS))
+@pytest.mark.parametrize("name", [f for f, cols in gen.COLUMNS.items() if "vin" in cols])
 def test_every_readable_vin_starts_with_syn(files, name):
     vins = {ref_vin(r["vin"]) for r in files[name]} - {None}
     assert all(v.startswith("SYN") for v in vins)

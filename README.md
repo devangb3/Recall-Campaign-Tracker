@@ -5,14 +5,15 @@ flow, module responsibilities, checks, storage, and CLI/API behavior.
 
 ## Part 1: synthetic data
 
-Generate the three dealership CSVs (seed 42, as-of 2026-11-01, about 500 vehicles):
+Generate the five input CSVs (seed 42, as-of 2026-11-01, about 500 vehicles):
 
 ```bash
 python3 -m recall_tracker.generate --out data/raw
 ```
 
 Options: `--seed`, `--as-of YYYY-MM-DD`, `--vehicles`, `--out`. The folder gets
-`affected_vehicles.csv`, `notices_sent.csv`, `repairs_done.csv`, plus
+`affected_vehicles.csv`, `notices_sent.csv`, `repairs_done.csv`,
+`vehicles.csv`, `campaigns.csv`, plus
 `planted_issues.csv` (every planted bad row, used only by the tests) and
 `manifest.json` (seed, as-of date, row counts, SHA-256 of each file).
 
@@ -22,7 +23,7 @@ Options: `--seed`, `--as-of YYYY-MM-DD`, `--vehicles`, `--out`. The folder gets
 python3 -m recall_tracker.ingest --raw data/raw --db data/recall.db --as-of 2026-11-01
 ```
 
-- If any of the three files is missing, unreadable, empty, or lacks a required
+- If any of the five files is missing, unreadable, empty, or lacks a required
   column, ingest stops with a clear error naming the file and changes nothing
   (exit code 2).
 - Safe fixes (VIN case, spaces and hyphens, loose campaign ids, ISO or US
@@ -30,11 +31,12 @@ python3 -m recall_tracker.ingest --raw data/raw --db data/recall.db --as-of 2026
   `data_issues`; quarantined rows also go to `quarantine` with the whole raw row.
 - Every run is a new ingest. The `cur_<table>` views show the latest one; older
   ingests are kept.
-- `--as-of` defaults to today. Dates after it are `FUTURE_DATE`.
+- `--as-of` defaults to today. Notice, repair and vehicle build dates after it
+  are `FUTURE_DATE`. Campaign production boundaries may extend into the future.
 
 ## Part 2: run the tracker
 
-Load all three CSVs, run both checks, save the run, and print the report as JSON:
+Load all five CSVs, run the checks, save the run, and print the report as JSON:
 
 ```bash
 python3 -m recall_tracker check --raw data/raw --db data/recall.db --as-of 2026-11-01
@@ -43,6 +45,21 @@ python3 -m recall_tracker check --raw data/raw --db data/recall.db --as-of 2026-
 The checks use accepted SQLite rows, not a CSV parser. Both
 walk the same affected vehicle-campaign pairs. A notice with a bad date is
 reported as a data issue. Conflicting dates and repairs before notice remain separate data-quality flags.
+
+We also have an automatic **Repair on an unaffected vehicle** flag. It uses
+these two new required inputs alongside the existing three files:
+
+- `vehicles.csv`: `vin,model,build_date` — the full vehicle inventory,
+  including vehicles outside the supplied affected list.
+- `campaigns.csv`: `campaign_id,model,start_date,end_date` — one model and
+  inclusive vehicle build-date range per campaign. These are production
+  boundaries, not the dates the campaign runs or notices are sent.
+
+For every accepted repair, the vehicle model must match the campaign model
+and its build date must be between `start_date` and `end_date`, including
+both dates. A mismatch produces one flag per VIN/campaign, with all accepted
+repair dates and the model/date evidence, in the separate **Flagged repairs**
+tab. 
 
 The repair limit defaults to **60 inclusive days**. Notice on January 1,
 2026 and repair on March 1 is day 60 (on time); March 2 is day 61 (late).
@@ -92,12 +109,14 @@ python3 -m recall_tracker serve --db data/recall.db --raw data/raw --port 8000
 Open <http://127.0.0.1:8000/>. The same server serves the UI from `ui/` (plain
 HTML, CSS and JavaScript, no build step) and the JSON API below, so there is
 one origin and no CORS. On a new database choose **Run check** to load the
-three CSVs. The page has three views:
+five CSVs. The page has four views:
 
 - **Flags:** counts, then notification and repair findings (equal weight, no
   ranking), then "Missing and bad data" with data issues and vehicle
   data-quality flags kept apart, each with a reason. The repair day limit
   control (default 60) recalculates the loaded data and the choice persists.
+- **Flagged repairs:** automatically identified repairs on unaffected vehicles,
+  with vehicle/campaign model, build date, inclusive range and reason.
 - **Vehicle detail** (click a VIN): whether the vehicle is on the affected
   list and in the notices file, the notice and repair dates the check used,
   inclusive days, the limit and result, every date on file, data problems, and
@@ -126,7 +145,8 @@ The server defaults to `127.0.0.1`. `GET /` and the `.html`, `.css` and `.js`
 files under `ui/` are served as static files (GET only); everything under
 `/api/` is JSON. A different front end can call the API directly or call
 `recall_tracker.api.Application.request` from an existing Python app adapter.
-The report contract does not change.
+The report adds `flagged_repairs` separately from `findings` and `data_quality`;
+vehicle facts include optional `vehicle` and `campaign` metadata.
 
 - `POST /api/checks`: ingest the configured CSV folder and save a run.
 - `POST /api/recheck`: check the loaded data again.
@@ -143,7 +163,7 @@ POST requests use `Content-Type: application/json`. Check/recheck requests
 accept optional `check_date` (`YYYY-MM-DD`) and `day_limit` (a positive
 integer). Successful checks return status 201 with `run_id`, `ingest_id`,
 `loaded_at` (when the CSV files behind the run were read, UTC) and `report`;
-the `report` is the existing `contract.to_dict` payload. A reload or a
+the `report` is the `contract.to_dict` payload. A reload or a
 `/api/day-limit` change reuses the loaded data, so `loaded_at` stays the
 same until the CSVs are read again. Run responses and `GET /api/report` (not
 a saved run from `/api/runs/<id>`) also carry `input_check`: `ok` when the CSV

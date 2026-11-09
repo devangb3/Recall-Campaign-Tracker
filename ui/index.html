@@ -20,6 +20,7 @@
   <main>
     <nav class="views" aria-label="Views">
       <a id="nav-flags" class="active" href="#">Flags</a>
+      <a id="nav-flagged-repairs" href="#/flagged-repairs">Flagged repairs</a>
       <a id="nav-history" href="#/history">Check history</a>
     </nav>
 
@@ -43,6 +44,12 @@
     <div id="detail" hidden></div>
 
     <div id="history" hidden></div>
+
+    <section id="flagged-repairs" aria-labelledby="flagged-repairs-title" hidden>
+      <h2 id="flagged-repairs-title">Flagged repairs</h2>
+      <p class="section-note">Repair on an unaffected vehicle: the vehicle model does not match the campaign, or its build date falls outside the campaign’s inclusive date range.</p>
+      <div id="flagged-repairs-list"></div>
+    </section>
 
     <div id="report" hidden>
       <div id="stats" class="stats" aria-label="Summary"></div>

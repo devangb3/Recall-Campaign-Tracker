@@ -2,18 +2,21 @@
 
 Ingest owns CSV parsing, safe fixes, quarantine and duplicate handling.
 This adapter only reads its SQLite output. It constructs the affected
-list once; both business checks receive that same list. Good notice or
-repair rows outside the list remain in ``facts`` for data-quality reports.
+list once; both existing checks receive that same list. Good notice or
+repair rows outside the list remain in ``facts``, including their same-ingest
+vehicle/campaign metadata for the independent unaffected-repair check.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from dataclasses import dataclass
 from datetime import date
 
 from .affected import AffectedList
 from .contract import AffectedVehicle, DataIssue, Facts, NoticeSent, RepairDone
+from .contract.facts import Campaign, Vehicle
 
 
 class SnapshotError(ValueError):
@@ -47,7 +50,7 @@ def read_snapshot(con: sqlite3.Connection,
         return _read_snapshot(con, ingest_id)
     except sqlite3.Error as exc:
         raise SnapshotError(
-            "Cannot read the ingest database; load the three dealership "
+            "Cannot read the ingest database; load the five dealership "
             "CSVs successfully before running checks.") from exc
 
 
@@ -103,9 +106,22 @@ def _read_snapshot(con: sqlite3.Connection,
             "WHEN 'notices_sent.csv' THEN 1 ELSE 2 END, i.src_row, i.issue_id",
             (chosen_id,)))
 
+    # Historical three-file ingests have no master rows. Their metadata
+    # remains unknown; never join them against a later upload's masters.
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    vehicles = ({vin: Vehicle(vin, model, date.fromisoformat(built))
+                 for vin, model, built in con.execute(
+                     "SELECT vin, model, build_date FROM vehicles WHERE ingest_id=?",
+                     (chosen_id,))} if "vehicles" in tables else {})
+    campaigns = ({cid: Campaign(cid, model, date.fromisoformat(start), date.fromisoformat(end))
+                  for cid, model, start, end in con.execute(
+                      "SELECT campaign_id, model, start_date, end_date FROM campaigns WHERE ingest_id=?",
+                      (chosen_id,))} if "campaigns" in tables else {})
+    facts = tuple(replace(f, vehicle=vehicles.get(f.vin), campaign=campaigns.get(f.campaign_id))
+                  for f in _facts(affected_rows, notices, repairs))
     return IngestSnapshot(
         ingest_id=chosen_id, as_of=date.fromisoformat(as_of_text),
-        affected=affected, facts=_facts(affected_rows, notices, repairs),
+        affected=affected, facts=facts,
         data_issues=issues)
 
 

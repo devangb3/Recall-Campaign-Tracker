@@ -21,7 +21,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
-            ("check", "Load the three CSVs and save their check results"),
+            ("check", "Load the five CSVs and save their check results"),
             ("recheck", "Recalculate loaded data without reading the CSVs"),
             ("report", "Read the latest report, or an original saved run"),
             ("runs", "List all saved runs"),

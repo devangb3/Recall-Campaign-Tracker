@@ -26,7 +26,7 @@ class CheckHistoryRow:
         require_date(self.check_date, "check date")
         if type(self.kind) is not FindingKind:
             raise ContractError(
-                "kind must be notification, repair, or data quality")
+                "kind must be notification, repair, data quality, or unaffected repair")
         require_text(self.reason, "reason")
         require_day_limit(self.day_limit)
 

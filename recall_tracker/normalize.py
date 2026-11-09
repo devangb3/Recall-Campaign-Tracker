@@ -34,6 +34,10 @@ HEADER_ALIASES = {
     "noticedate": "notice_date",
     "repairdate": "repair_date",
     "technote": "tech_note",
+    "model": "model",
+    "builddate": "build_date",
+    "startdate": "start_date",
+    "enddate": "end_date",
 }
 
 _SPACES_AND_HYPHENS = re.compile(r"[\s\-]+")
@@ -140,3 +144,10 @@ def normalize_date(raw: str | None, label: str = "Date",
 def normalize_note(raw: str | None) -> str:
     """tech_note is free text: returned exactly as written, never read."""
     return "" if raw is None else raw
+
+
+def normalize_model(raw: str | None) -> Result:
+    """Match model names ignoring case and repeated whitespace only."""
+    if _blank(raw):
+        return _bad("MISSING_VALUE", "Model is blank.")
+    return Result(" ".join(raw.split()).upper())

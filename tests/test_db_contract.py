@@ -22,17 +22,19 @@ COLUMNS = {
                      "notice_date"],
     "repairs_done": ["ingest_id", "src_file", "src_row", "vin", "campaign_id",
                      "repair_date", "tech_note"],
+    "vehicles": ["ingest_id", "src_file", "src_row", "vin", "model", "build_date"],
+    "campaigns": ["ingest_id", "src_file", "src_row", "campaign_id", "model", "start_date", "end_date"],
     "data_issues": ["issue_id", "ingest_id", "file", "src_row", "column",
                     "raw_value", "issue_code", "action", "reason", "vin",
                     "campaign_id", "raw_row"],
     "quarantine": ["ingest_id", "file", "src_row", "raw_json", "issue_codes"],
 }
 CURRENT = ["affected_vehicles", "notices_sent", "repairs_done", "data_issues",
-           "quarantine"]
+           "quarantine", "vehicles", "campaigns"]
 VIN = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
 CAMPAIGN = re.compile(r"RC-[0-9]{4}-[0-9]{3}")
 ISO = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-NO_OWNER_TABLES = ["campaigns", "owners", "registrations", "sales", "mailings",
+NO_OWNER_TABLES = [ "owners", "registrations", "sales", "mailings",
                    "dealers", "owner_history"]
 
 

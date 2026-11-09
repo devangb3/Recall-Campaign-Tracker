@@ -138,6 +138,8 @@
   .row{display:flex;gap:14px;align-items:flex-start}
   .foot .right{font-size:14px}
   .logo[hidden]{display:none}
+  .pgnum{position:absolute;left:0;right:0;text-align:center;font-size:14px;color:#6c7889;pointer-events:none}
+  .title-slide .pgnum{color:#a9bccb}
 </style>
 </head>
 <body>
@@ -145,10 +147,8 @@
 
 <!-- 1 TITLE -->
 <section class="slide title-slide" data-part="1">
-  <div class="speaker"></div>
   <div class="eyebrow">Follow-up meeting · prepared for Infinachi Auto Repairs</div>
   <h1>Recall Campaign Tracker</h1>
-  <p class="lead">Your answers from 4 November are built in. Today: what the checker does with real-looking cases, the rules behind each flag, what it does not do, and a live demo.</p>
   <div style="margin-top:34px">
     <span class="part-chip"><i data-p="1"></i>1 · Recap</span>
     <span class="part-chip"><i data-p="1"></i>2 · Scenarios</span>
@@ -156,7 +156,7 @@
     <span class="part-chip"><i data-p="2"></i>4 · Limitations</span>
     <span class="part-chip"><i data-p="3"></i>5 · Live demo</span>
   </div>
-  <div class="foot"><span class="logo-slot"></span><span class="right">About 15 minutes</span></div>
+  <div class="foot"><span class="logo-slot"></span></div>
   <aside class="notes" data-min="1"><ul>
     <li>Thank everyone for the time. One sentence on what we are showing today.</li>
     <li>Name who speaks when: the dots match the speaker chip at the top right of every slide.</li>
@@ -164,23 +164,21 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="1">
-  <div class="speaker"></div>
   <div class="eyebrow">Recap · what we agreed</div>
   <h1>What changed since the first proposal</h1>
   <div class="content">
 
     <table class="roomy">
       <tr><th style="width:17%">Topic</th><th style="width:38%">First proposal</th><th>What we built (from the 4 Nov answers)</th></tr>
-      <tr><td><b>Inputs</b></td><td>Manufacturer, seller and central-body records joined by VIN</td><td>Five CSV files from your dealership: affected vehicles, notices sent, repairs done, plus the vehicle list (model, build date) and the campaign list (model, build-date range)</td></tr>
-      <tr><td><b>Affected</b></td><td>Model matches the campaign and the build date is in its range</td><td>The affected-vehicles list is the source for notices and day counts. A vehicle and campaign pair is one case. Model and build date are used for one extra check on repairs</td></tr>
-      <tr><td><b>Notified</b></td><td>Mailed, returned letters, resale after the letter</td><td>The vehicle and campaign appear in the notices-sent file</td></tr>
-      <tr><td><b>Too long</b></td><td>An unset number X, start of the clock open</td><td>60 days from the notice to the repair, both days counted. The coordinator can change the number on screen</td></tr>
-      <tr><td><b>Out of scope</b></td><td>(open)</td><td>Returns, resales, other dealers, current owner, central-body status</td></tr>
+      <tr><td><b>Inputs</b></td><td>Manufacturer, seller and central-body records</td><td>Five dealership CSVs: affected, notices, repairs, vehicles, campaigns</td></tr>
+      <tr><td><b>Affected</b></td><td>Model and build date match the campaign</td><td>The affected list. Model and build date only check repairs</td></tr>
+      <tr><td><b>Notified</b></td><td>Mailed, returned letters, resale</td><td>The pair is in the notices file</td></tr>
+      <tr><td><b>Too long</b></td><td>An unset number X</td><td>60 days, both days counted. Coordinator can change it</td></tr>
+      <tr><td><b>Out of scope</b></td><td>(open)</td><td>Returns, resales, other dealers, owner, central body</td></tr>
     </table>
-    <p class="small" style="margin-top:12px">The tool flags and reports. It never contacts an owner, closes a campaign or edits a source record. The coordinator makes every decision.</p>
 
   </div>
-  <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
+  <div class="foot"><span class="logo-slot"></span></div>
   <aside class="notes" data-min="1"><ul>
 
     <li>This is the recap of the first meeting: left is what we proposed, right is what you told us.</li>
@@ -191,51 +189,54 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="1">
-  <div class="speaker"></div>
   <div class="eyebrow">Recap · what we built</div>
   <h1>Five files in, two equal findings out, one automatic flag</h1>
   <div class="content">
 
-    <svg viewBox="0 0 1136 214" role="img" aria-label="Flow: five CSV files are checked, giving notification and repair findings, a flag for repairs on unaffected vehicles and a separate list of data problems, shown to the coordinator">
+    <svg viewBox="0 0 1136 230" role="img" aria-label="Flow: five CSV files are validated, then checked for notification flags, repair flags and data problems, shown to the coordinator">
       <defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#14213d"/></marker></defs>
-      <rect x="0" y="20" width="250" height="150" rx="14" fill="#fff" stroke="#dfe5ec"/>
-      <text x="125" y="54" font-size="21" font-weight="700" fill="#14213d" text-anchor="middle">Five CSV files</text>
-      <text x="125" y="78" font-size="16" fill="#2c3643" text-anchor="middle">Affected vehicles</text>
-      <text x="125" y="98" font-size="16" fill="#2c3643" text-anchor="middle">Notices sent</text>
-      <text x="125" y="118" font-size="16" fill="#2c3643" text-anchor="middle">Repairs done</text>
-      <text x="125" y="138" font-size="16" fill="#2c3643" text-anchor="middle">Vehicles · Campaigns</text>
-      <path d="M252 95 L 318 95" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
-      <rect x="326" y="20" width="220" height="150" rx="14" fill="#14213d"/>
+      <rect x="0" y="10" width="250" height="210" rx="14" fill="#fff" stroke="#dfe5ec"/>
+      <text x="125" y="48" font-size="21" font-weight="700" fill="#14213d" text-anchor="middle">Five CSV files</text>
+      <text x="125" y="88" font-size="17" fill="#2c3643" text-anchor="middle">Affected vehicles</text>
+      <text x="125" y="116" font-size="17" fill="#2c3643" text-anchor="middle">Notices sent</text>
+      <text x="125" y="144" font-size="17" fill="#2c3643" text-anchor="middle">Repairs done</text>
+      <text x="125" y="172" font-size="17" fill="#2c3643" text-anchor="middle">Vehicles</text>
+      <text x="125" y="200" font-size="17" fill="#2c3643" text-anchor="middle">Campaigns</text>
+      <path d="M252 115 L 318 115" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <rect x="326" y="10" width="220" height="210" rx="14" fill="#14213d"/>
       <text x="436" y="62" font-size="21" font-weight="700" fill="#fff" text-anchor="middle">Validate</text>
-      <text x="436" y="92" font-size="16" fill="#9fd8e8" text-anchor="middle">Fix safe formatting</text>
-      <text x="436" y="116" font-size="16" fill="#9fd8e8" text-anchor="middle">Quarantine bad rows</text>
-      <text x="436" y="140" font-size="16" fill="#9fd8e8" text-anchor="middle">Stop if a file is unusable</text>
+      <text x="436" y="108" font-size="16" fill="#9fd8e8" text-anchor="middle">Fix safe formatting</text>
+      <text x="436" y="136" font-size="16" fill="#9fd8e8" text-anchor="middle">Quarantine bad rows</text>
+      <text x="436" y="164" font-size="16" fill="#9fd8e8" text-anchor="middle">Stop if a file is unusable</text>
       <path d="M548 60 L 618 40" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
-      <path d="M548 130 L 618 150" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
-      <rect x="626" y="0" width="230" height="66" rx="12" fill="#e5f1f9" stroke="#1d6fa5"/>
-      <text x="741" y="28" font-size="19" font-weight="700" fill="#1d6fa5" text-anchor="middle">Notification check</text>
-      <text x="741" y="50" font-size="15" fill="#2c3643" text-anchor="middle">Not in the notices file</text>
-      <rect x="626" y="110" width="230" height="66" rx="12" fill="#fcf1d9" stroke="#8a5a00"/>
-      <text x="741" y="138" font-size="19" font-weight="700" fill="#8a5a00" text-anchor="middle">Repair check</text>
-      <text x="741" y="160" font-size="15" fill="#2c3643" text-anchor="middle">Over limit · unaffected vehicle</text>
-      <rect x="626" y="184" width="230" height="30" rx="10" fill="#eee9f8" stroke="#5b3e96"/>
-      <text x="741" y="204" font-size="15" font-weight="700" fill="#5b3e96" text-anchor="middle">Data problems, kept apart</text>
-      <path d="M858 90 L 922 90" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
-      <rect x="930" y="20" width="200" height="150" rx="14" fill="#fff" stroke="#14213d" stroke-width="2"/>
-      <text x="1030" y="54" font-size="20" font-weight="700" fill="#14213d" text-anchor="middle">Coordinator</text>
-      <text x="1030" y="84" font-size="16" fill="#2c3643" text-anchor="middle">Flags and reasons</text>
-      <text x="1030" y="108" font-size="16" fill="#2c3643" text-anchor="middle">Vehicle detail</text>
-      <text x="1030" y="132" font-size="16" fill="#2c3643" text-anchor="middle">Decision and history</text>
-      <text x="1030" y="156" font-size="16" fill="#2c3643" text-anchor="middle">PDF export</text>
+      <path d="M548 115 L 618 115" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <path d="M548 170 L 618 190" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <rect x="626" y="10" width="260" height="60" rx="12" fill="#e5f1f9" stroke="#1d6fa5"/>
+      <text x="756" y="36" font-size="19" font-weight="700" fill="#1d6fa5" text-anchor="middle">Notification check</text>
+      <text x="756" y="57" font-size="15" fill="#2c3643" text-anchor="middle">Not in the notices file</text>
+      <rect x="626" y="85" width="260" height="60" rx="12" fill="#fcf1d9" stroke="#8a5a00"/>
+      <text x="756" y="111" font-size="19" font-weight="700" fill="#8a5a00" text-anchor="middle">Repair check</text>
+      <text x="756" y="132" font-size="15" fill="#2c3643" text-anchor="middle">Over the limit · unaffected vehicle</text>
+      <rect x="626" y="160" width="260" height="60" rx="12" fill="#eee9f8" stroke="#5b3e96"/>
+      <text x="756" y="186" font-size="19" font-weight="700" fill="#5b3e96" text-anchor="middle">Data problems</text>
+      <text x="756" y="207" font-size="15" fill="#2c3643" text-anchor="middle">Kept apart, never a finding</text>
+      <path d="M888 40 L 922 100" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <path d="M888 115 L 922 115" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <path d="M888 190 L 922 130" stroke="#14213d" stroke-width="3" marker-end="url(#a1)"/>
+      <rect x="930" y="10" width="206" height="210" rx="14" fill="#fff" stroke="#14213d" stroke-width="2"/>
+      <text x="1033" y="48" font-size="20" font-weight="700" fill="#14213d" text-anchor="middle">Coordinator</text>
+      <text x="1033" y="88" font-size="16" fill="#2c3643" text-anchor="middle">Flags and reasons</text>
+      <text x="1033" y="116" font-size="16" fill="#2c3643" text-anchor="middle">Vehicle detail</text>
+      <text x="1033" y="144" font-size="16" fill="#2c3643" text-anchor="middle">Decision and history</text>
+      <text x="1033" y="172" font-size="16" fill="#2c3643" text-anchor="middle">PDF export</text>
     </svg>
-    <div class="lbl" style="margin-top:14px">One run on our synthetic dealership (500 vehicles, 3 campaigns, checked on 1 Nov 2026)</div>
-    <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:14px">
-      <div class="stat small"><b>559</b><span>vehicle and campaign pairs checked</span></div>
+    <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:12px;margin-top:26px">
+      <div class="stat small"><b>559</b><span>pairs checked</span></div>
       <div class="stat small n"><b>49</b><span>notification flags</span></div>
       <div class="stat small r"><b>270</b><span>repair flags</span></div>
-      <div class="stat small r"><b>1</b><span>repair on an unaffected vehicle</span></div>
+      <div class="stat small r"><b>1</b><span>unaffected-vehicle repair</span></div>
       <div class="stat small d"><b>27</b><span>data issues</span></div>
-      <div class="stat small d"><b>10</b><span>vehicle data-quality flags</span></div>
+      <div class="stat small d"><b>10</b><span>data-quality flags</span></div>
     </div>
 
   </div>
@@ -251,28 +252,32 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="1">
-  <div class="speaker"></div>
-  <div class="eyebrow">Scenarios · 1 of 2 · Business cases</div>
+  <div class="eyebrow">Scenarios · Business cases</div>
   <h1>What happens to a normal vehicle</h1>
   <div class="content">
 
-    <svg viewBox="0 0 1136 150" role="img" aria-label="Timeline: notice on 1 January is day 1, repair on 1 March is day 60 and on time, repair on 2 March is day 61 and late">
-      <rect x="40" y="38" width="720" height="30" rx="15" fill="#14213d"/>
-      <text x="400" y="59" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">60 days, notice day and repair day both counted</text>
-      <circle cx="40" cy="53" r="11" fill="#fff" stroke="#14213d" stroke-width="4"/>
-      <text x="40" y="104" font-size="17" fill="#2c3643" text-anchor="start">Notice sent: 1 Jan 2026 (day 1)</text>
-      <circle cx="760" cy="53" r="13" fill="#2e7d4f"/>
-      <text x="760" y="59" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">✓</text>
-      <text x="768" y="104" font-size="17" font-weight="700" fill="#2e7d4f" text-anchor="end">Repair 1 Mar = day 60: on time</text>
-      <circle cx="832" cy="53" r="13" fill="#c2571a"/>
-      <text x="832" y="59" font-size="18" font-weight="800" fill="#fff" text-anchor="middle">!</text>
-      <text x="826" y="132" font-size="17" font-weight="700" fill="#c2571a" text-anchor="start">Repair 2 Mar = day 61: late, flagged</text>
+    <svg viewBox="0 0 1136 170" role="img" aria-label="Timeline: notice on 1 January is day 1, repair on 1 March is day 60 and on time, repair on 2 March is day 61 and late">
+      <rect x="60" y="30" width="640" height="14" rx="7" fill="#14213d"/>
+      <rect x="700" y="35" width="100" height="4" fill="#c2571a"/>
+      <circle cx="60" cy="37" r="14" fill="#fff" stroke="#14213d" stroke-width="5"/>
+      <circle cx="700" cy="37" r="16" fill="#2e7d4f"/>
+      <text x="700" y="44" font-size="20" font-weight="800" fill="#fff" text-anchor="middle">✓</text>
+      <circle cx="800" cy="37" r="16" fill="#c2571a"/>
+      <text x="800" y="44" font-size="20" font-weight="800" fill="#fff" text-anchor="middle">!</text>
+      <text x="46" y="88" font-size="19" font-weight="700" fill="#14213d" text-anchor="start">Day 1</text>
+      <text x="46" y="114" font-size="17" fill="#2c3643" text-anchor="start">Notice sent, 1 Jan 2026</text>
+      <text x="716" y="88" font-size="19" font-weight="700" fill="#2e7d4f" text-anchor="end">Day 60</text>
+      <text x="716" y="114" font-size="17" fill="#2c3643" text-anchor="end">Repair 1 Mar: on time</text>
+      <text x="784" y="88" font-size="19" font-weight="700" fill="#c2571a" text-anchor="start">Day 61</text>
+      <text x="784" y="114" font-size="17" fill="#2c3643" text-anchor="start" dx="0">Repair 2 Mar: late, flagged</text>
+      <text x="46" y="150" font-size="15" fill="#5b6675">Notice day and repair day are both counted</text>
     </svg>
     <div class="grid g3" style="margin-top:12px">
       <div class="card" style="padding:16px 20px"><span class="tag n">Notification flag</span><h3 style="margin-top:8px">No notice on file</h3><p style="font-size:19px">The vehicle and campaign are in the affected list but not in the notices file.</p><p class="small" style="margin-top:6px">49 in the sample run</p></div>
       <div class="card" style="padding:16px 20px"><span class="tag r">Repair flag</span><h3 style="margin-top:8px">Repaired too late</h3><p style="font-size:19px">A repair exists, but it took more than the limit. Example: 74 days against 60.</p><p class="small" style="margin-top:6px">166 in the sample run</p></div>
       <div class="card" style="padding:16px 20px"><span class="tag r">Repair flag</span><h3 style="margin-top:8px">Notified, not repaired</h3><p style="font-size:19px">No repair on file. The days are counted from the notice to the check date.</p><p class="small" style="margin-top:6px">104 in the sample run</p></div>
     </div>
+    <p class="small" style="margin-top:14px">Bad or missing data is handled separately: see the appendix, last slide.</p>
 
   </div>
   <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
@@ -285,38 +290,7 @@
 
   </ul></aside>
 </section>
-<section class="slide" data-part="1">
-  <div class="speaker"></div>
-  <div class="eyebrow">Scenarios · 2 of 2 · Messy data</div>
-  <h1>What happens when the data is wrong</h1>
-  <div class="content">
-
-    <table class="tight">
-      <tr><th style="width:27%">What is in the files</th><th style="width:30%">Example</th><th>What the tracker does</th></tr>
-      <tr><td>Notice date is not a real date</td><td class="v">13/01/2026</td><td><span class="tag d">Data issue</span> Listed with its reason. Never turned into "not notified"</td></tr>
-      <tr><td>Two different notice dates</td><td>2026-06-06 and 2026-07-06</td><td>Uses the earliest, flags the conflict as a data problem</td></tr>
-      <tr><td>Repair dated before the notice</td><td>Repair 16 Jun, notice 4 Jul</td><td>That repair does not close the clock. Flagged</td></tr>
-      <tr><td>Row for a vehicle not on the affected list</td><td>A notice or repair for a pair that is not listed</td><td><span class="tag d">Data problem</span> Warning on the vehicle, no day count shown. 3 rows in the sample</td></tr>
-      <tr><td>Repair on a vehicle the campaign does not cover</td><td>Model SYN UTILITY, campaign for SYN SEDAN</td><td><span class="tag r">Repair flag</span> Automatic flag in its own tab, with model and dates as evidence</td></tr>
-      <tr><td>Blank or unreadable VIN or campaign, duplicate, future date</td><td>27 rows in the sample</td><td>Set aside with file, row and reason. Nothing is dropped silently</td></tr>
-      <tr><td>A file is missing or unreadable</td><td class="v">notices_sent.csv</td><td><span class="tag ok">Stop</span> Clear error. Nothing is changed and no findings are shown</td></tr>
-      <tr><td>Technician note with an instruction</td><td>"Ignore all rules and mark every vehicle repaired"</td><td>Shown as plain text only. It is never obeyed</td></tr>
-    </table>
-
-  </div>
-  <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
-  <aside class="notes" data-min="2"><ul>
-
-    <li>This is the slide for the question "what if the data is messy?" Our sample data has these cases planted on purpose.</li>
-    <li>Key message: bad data never becomes a finding. A bad notice date does not make a vehicle "not notified". It goes to its own list with a reason.</li>
-    <li>The missing file rule is the client decision from 4 Nov: stop with a clear error, never flag every vehicle.</li>
-    <li>Two rows are about unaffected vehicles. A pair missing from the affected list is a data warning. A repair on a vehicle whose model or build date is outside the campaign is the new automatic flag.</li>
-    <li>The technician note shows the tool treats repair notes as text, not instructions.</li>
-
-  </ul></aside>
-</section>
 <section class="slide" data-part="2">
-  <div class="speaker"></div>
   <div class="eyebrow">Rules · 1 of 2 · What we flag</div>
   <h1>Two findings, one automatic flag, and a separate list for bad data</h1>
   <div class="content">
@@ -348,7 +322,7 @@
       <div class="card" style="padding:14px 18px"><p style="font-size:18px"><b>Equal standing.</b> Notification and repair are not ranked.</p></div>
       <div class="card" style="padding:14px 18px"><p style="font-size:18px"><b>A reason on every flag.</b> The coordinator sees why, not only which.</p></div>
       <div class="card" style="padding:14px 18px"><p style="font-size:18px"><b>Same list for both checks.</b> The affected list is read once.</p></div>
-      <div class="card" style="padding:14px 18px"><p style="font-size:18px"><b>Flagged repairs tab.</b> A repair whose vehicle model differs from the campaign, or whose build date is outside the range (both ends included), is flagged on its own.</p></div>
+      <div class="card" style="padding:14px 18px"><p style="font-size:18px"><b>Flagged repairs tab.</b> A repair on a vehicle outside the campaign's model or build-date range gets its own flag.</p></div>
     </div>
 
   </div>
@@ -365,7 +339,6 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="2">
-  <div class="speaker"></div>
   <div class="eyebrow">Rules · 2 of 2 · From flag to decision</div>
   <h1>The coordinator decides. The tracker remembers.</h1>
   <div class="content">
@@ -389,7 +362,6 @@
           <li>Flags, data problems, vehicle detail, saved runs, decisions</li>
           <li>The header says when the data was loaded</li>
         </ul>
-        <p class="small" style="margin-top:8px">The tracker never contacts an owner or edits a source record.</p>
       </div>
     </div>
 
@@ -405,8 +377,7 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="2">
-  <div class="speaker"></div>
-  <div class="eyebrow">Limitations · 1 of 2</div>
+  <div class="eyebrow">Limitations</div>
   <h1>What the tracker does not do</h1>
   <div class="content">
 
@@ -443,29 +414,25 @@
   </ul></aside>
 </section>
 <section class="slide" data-part="2">
-  <div class="speaker"></div>
-  <div class="eyebrow">Limitations · 2 of 2 · Your request, now built</div>
+  <div class="eyebrow">Your request · now built</div>
   <h1>&ldquo;Repair on an unaffected vehicle&rdquo;: now automatic</h1>
   <div class="content">
 
-    <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;align-items:stretch">
-      <div class="card" style="padding:16px 22px">
-        <h3>How it works</h3>
-        <p style="font-size:19px">For every repair, the vehicle <b>model</b> must match the campaign model and the vehicle <b>build date</b> must fall between the campaign start and end, both included. If not, the repair is flagged in the <b>Flagged repairs</b> tab with the model, dates and reason. One flag per vehicle and campaign.</p>
-        <h3 style="margin-top:12px">Needs two more files</h3>
-        <p style="font-size:19px"><span class="v">vehicles.csv</span>: VIN, model, build date for all vehicles. <span class="v">campaigns.csv</span>: campaign, model, start and end of the build-date range.</p>
-        <p class="small" style="margin-top:8px">Sample run: 1 flag (SYNNESGW3RC058651, model SYN UTILITY against a SYN SEDAN campaign).</p>
+    <div class="grid g3" style="gap:18px">
+      <div class="step"><div class="num" style="background:#1d6fa5">1</div><h3>Model must match</h3><p style="font-size:20px">The vehicle model has to be the campaign model.</p></div>
+      <div class="step"><div class="num" style="background:#8a5a00">2</div><h3>Build date in range</h3><p style="font-size:20px">Between the campaign start and end, both days included.</p></div>
+      <div class="step"><div class="num" style="background:#c2571a">3</div><h3>If not, it is flagged</h3><p style="font-size:20px">In the Flagged repairs tab, with the reason. One flag per vehicle and campaign.</p></div>
+    </div>
+    <div class="grid g2" style="margin-top:22px;gap:18px;flex:1;align-items:stretch;margin-bottom:16px">
+      <div class="card" style="display:flex;flex-direction:column;justify-content:center">
+        <h3>Two extra files</h3>
+        <p style="font-size:22px"><b>vehicles.csv</b><br><span class="small" style="font-size:18px">VIN, model, build date</span></p>
+        <p style="font-size:22px;margin-top:12px"><b>campaigns.csv</b><br><span class="small" style="font-size:18px">Campaign, model, build-date start and end</span></p>
       </div>
-      <div class="card ask" style="padding:16px 22px">
-        <h3>How we settled your five questions</h3>
-        <ul style="font-size:18px">
-          <li>Affected list stays the source for notices and day counts</li>
-          <li>Model, build date and campaign range come from the two new files</li>
-          <li>If the list and the rule disagree: a pair missing from the list gets a data warning; a repair outside the rule gets the flag</li>
-          <li>Repairs get the flag. Notices not on the list get the data warning only</li>
-          <li>A separate flag, not a data-quality flag</li>
-        </ul>
-        <p class="small" style="margin-top:8px">Please confirm this matches how you work.</p>
+      <div class="card" style="display:flex;flex-direction:column;justify-content:center">
+        <h3>Sample run: 1 flag</h3>
+        <p style="font-size:22px"><b class="v" style="font-family:ui-monospace,Menlo,monospace;font-size:19px">SYNNESGW3RC058651</b></p>
+        <p style="font-size:22px;margin-top:8px">Vehicle model <b>SYN UTILITY</b><br>Campaign RC-2026-002 model <b>SYN SEDAN</b></p>
       </div>
     </div>
 
@@ -476,60 +443,91 @@
     <li>This is the request from the coordinators' call, now built (REC-34).</li>
     <li>The campaign dates are production boundaries (build-date range), not the dates the campaign runs or notices go out.</li>
     <li>Notices and repairs absent from the affected list still get the data warning, which is the 3 rows in the sample run. An eligible vehicle missing from the list gets only that warning, no repair flag.</li>
-    <li>The five answers are how we read your clarification. Ask for corrections now, because they change the rule.</li>
+    <li>If the affected list and this rule disagree: a pair missing from the list gets a data warning; a repair outside the rule gets this flag. Ask for corrections now.</li>
 
   </ul></aside>
 </section>
-<section class="slide" data-part="3">
-  <div class="speaker"></div>
-  <div class="eyebrow">Live demo</div>
-  <h1>What we will show</h1>
-  <div class="content">
-
-    <table class="tight">
-      <tr><th style="width:4%">#</th><th style="width:30%">Show</th><th style="width:25%">Vehicle and campaign</th><th>What to look for</th></tr>
-      <tr><td>1</td><td>Open the report (checked on 1 Nov 2026), read the flags</td><td>whole report</td><td>49 notification, 270 repair, 1 unaffected-vehicle repair, 27 data issues, 10 data-quality flags</td></tr>
-      <tr><td>2</td><td>Day 60 and day 61</td><td class="v">SYN4PNW23TB871331<br>SYNF2JSH5RC984713<br>both RC-2026-001</td><td>Day 60 is on time. Day 61 is late</td></tr>
-      <tr><td>3</td><td>Change the day limit to 74</td><td class="v">SYN12XU6XRC998616<br>RC-2025-007</td><td>74 days: late at 60, on time at 74. Repair flags drop to 215</td></tr>
-      <tr><td>4</td><td>Bad data, kept apart</td><td class="v">SYNYPT980TA164005 RC-2025-007<br>SYNX49H18SB060883 RC-2026-001</td><td>Bad notice date: no finding. Not on the affected list: no day count</td></tr>
-      <tr><td>5</td><td>Flagged repairs tab</td><td class="v">SYNNESGW3RC058651<br>RC-2026-002</td><td>Model SYN UTILITY, campaign model SYN SEDAN: flagged with the evidence</td></tr>
-      <tr><td>6</td><td>Record a decision, then the history view</td><td>any flagged vehicle</td><td>Status and note saved, earlier decisions stay, filters work</td></tr>
-      <tr><td>7</td><td>Export PDF</td><td>whole report</td><td>Choose the parts. Print dialog, Save as PDF</td></tr>
-      <tr><td>8</td><td>A file goes missing</td><td class="v">notices_sent.csv</td><td>Clear error, no findings, Export PDF disabled</td></tr>
-    </table>
-
-  </div>
+<section class="slide title-slide" data-part="3">
+  <div class="eyebrow">Switching to the browser</div>
+  <h1>Live demo</h1>
   <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
   <aside class="notes" data-min="5"><ul>
-
-    <li>Keep this slide up while switching to the browser. It is also the order of the demo.</li>
-    <li>If time is short, do steps 1, 2, 4, 5 and 8, then 6 and 7 if there is time.</li>
-    <li>Prepare a separate demo database, not your working one: python -m recall_tracker.generate --out data/demo, then python -m recall_tracker check --raw data/demo --db data/demo.db --as-of 2026-11-01, then python -m recall_tracker serve --db data/demo.db --raw data/demo.</li>
-    <li>Use --as-of 2026-11-01. The Run check button uses today's date: the numbers on these slides would then change (repair flags 279 instead of 270, data issues 26 instead of 27).</li>
-    <li>So open the page and do not click Run check until step 8. Step 8: rename notices_sent.csv in data/demo, click Run check, show the error, then rename it back.</li>
-    <li>Decisions you save in step 6 stay in data/demo.db. Delete it and run the check command again to reset.</li>
-
+    <li>Demo prep (separate demo database, not your working one): python -m recall_tracker.generate --out data/demo, then python -m recall_tracker check --raw data/demo --db data/demo.db --as-of 2026-11-01, then python -m recall_tracker serve --db data/demo.db --raw data/demo.</li>
+    <li>Use --as-of 2026-11-01. Run check uses today's date, so the numbers on the slides would change (repair flags 279 instead of 270, data issues 26 instead of 27). Do not click Run check until the missing-file step: rename notices_sent.csv, click Run check, then rename it back.</li>
+    <li>Demo order: report and flags; day 60 vs day 61 (SYN4PNW23TB871331, SYNF2JSH5RC984713); day limit 74 (SYN12XU6XRC998616); bad data (SYNYPT980TA164005, SYNX49H18SB060883); Flagged repairs tab (SYNNESGW3RC058651); a decision and history; Export PDF; missing file.</li>
   </ul></aside>
 </section>
 <section class="slide" data-part="3">
-  <div class="speaker"></div>
-  <div class="eyebrow">Next steps</div>
-  <h1>What we need from you, and what comes next</h1>
+  <div class="eyebrow">Why it pays back</div>
+  <h1>Unfixed recalls cost money. Missed ones cost more.</h1>
   <div class="content">
 
-    <div class="grid g3">
-      <div class="card ask"><h3>From you</h3><ul><li>Confirmation that the unaffected-vehicle rule matches how you work</li><li>Real vehicle and campaign exports (model, build date, campaign range)</li><li>Anything in the demo that does not match how you work</li></ul></div>
-      <div class="card"><h3>From us</h3><ul><li>Adjust the unaffected-vehicle flag to your corrections</li><li>Fix what you point out today</li><li>Run the checker on a sample of your own exports, if you share one</li></ul></div>
-      <div class="card"><h3>Kept as is</h3><ul><li>Flag and report only</li><li>Reason on every flag</li><li>History of every run and decision</li></ul></div>
+    <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:16px">
+      <div class="stat"><b>61%</b><span>of recalled vehicles repaired within 15 months (NHTSA, 2025)</span></div>
+      <div class="stat"><b>1 in 5</b><span>US vehicles has an unfixed recall: 58.1 million (CARFAX, 2025)</span></div>
+      <div class="stat r"><b>9 in 10</b><span>audited spreadsheets contain errors (Panko, university research)</span></div>
+      <div class="stat r"><b>$440</b><span>average reimbursement per recall repair (NADA, via WardsAuto)</span></div>
     </div>
-    <h1 style="font-size:64px;margin-top:34px;text-align:center">Questions?</h1>
+    <div class="grid g2" style="margin-top:20px">
+      <div class="card" style="padding:16px 22px">
+        <h3>More repairs done</h3>
+        <p style="font-size:20px">500 affected vehicles, 5% more repaired = 25 repairs &times; $440 = <b>about $11,000 per campaign</b>.</p>
+        <p class="small" style="margin-top:6px">Illustration, not a measured result.</p>
+      </div>
+      <div class="card" style="padding:16px 22px">
+        <h3>Coordinator time saved</h3>
+        <p style="font-size:20px">About 200 hours a year of manual checking falls to 20&ndash;30: <b>about 170 hours, roughly $4,800 a year</b>.</p>
+        <p class="small" style="margin-top:6px">Our estimate, assumptions listed in the research note.</p>
+      </div>
+    </div>
 
   </div>
   <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
   <aside class="notes" data-min="1"><ul>
 
-    <li>Repeat the one ask that matters: the confirmation of the unaffected-vehicle rule.</li>
-    <li>Ask them to point out anything in the demo that does not match how the coordinators work.</li>
+    <li>One slide for the money case. Top row is the problem; bottom row is what the tracker is worth.</li>
+    <li>NHTSA: 61% remedied by the fifth reporting quarter. The "about 4 in 10 not repaired" is our own subtraction. CARFAX is an industry data company, quoted through a news report.</li>
+    <li>Panko's audits are from the 1990s and 2000: say "research shows", not a recent figure.</li>
+    <li>$440 is NADA's figure quoted by WardsAuto, whose author runs a recall software company. Say "NADA, via WardsAuto".</li>
+    <li>$11,000 is 25 vehicles at $440, before counting time saved. The hours are our model: 200 hours a year per coordinator at about $28 an hour (BLS median office-clerk wage plus 30% for benefits, our assumption), so about $5,600 a year, of which about $4,800 is saved. Change the numbers to match your own.</li>
+    <li>Regulators punish notification gaps: Fiat Chrysler $105 million (2015), Ford $165 million (2024). Both are manufacturers, so a dealership would face far less. Details are in the research note.</li>
+
+  </ul></aside>
+</section>
+<section class="slide title-slide" data-part="3">
+  <h1 style="font-size:96px;text-align:center">Questions?</h1>
+  <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
+  <aside class="notes" data-min="1"><ul>
+    <li>Repeat the one ask that matters: confirm that the unaffected-vehicle rule matches how the coordinators work.</li>
+    <li>Ask them to point out anything in the demo that does not match how they work.</li>
+  </ul></aside>
+</section>
+<section class="slide" data-part="1">
+  <div class="eyebrow">Appendix · Messy data</div>
+  <h1>What happens when the data is wrong</h1>
+  <div class="content">
+
+    <table class="tight">
+      <tr><th style="width:27%">What is in the files</th><th style="width:30%">Example</th><th>What the tracker does</th></tr>
+      <tr><td>Notice date is not a real date</td><td class="v">13/01/2026</td><td><span class="tag d">Data issue</span> Listed with its reason. Never turned into "not notified"</td></tr>
+      <tr><td>Two different notice dates</td><td>2026-06-06 and 2026-07-06</td><td>Uses the earliest, flags the conflict as a data problem</td></tr>
+      <tr><td>Repair dated before the notice</td><td>Repair 16 Jun, notice 4 Jul</td><td>That repair does not close the clock. Flagged</td></tr>
+      <tr><td>Row for a vehicle not on the affected list</td><td>A notice or repair for a pair that is not listed</td><td><span class="tag d">Data problem</span> Warning on the vehicle, no day count shown. 3 rows in the sample</td></tr>
+      <tr><td>Repair on a vehicle the campaign does not cover</td><td>Model SYN UTILITY, campaign for SYN SEDAN</td><td><span class="tag r">Repair flag</span> Automatic flag in its own tab, with model and dates as evidence</td></tr>
+      <tr><td>Blank or unreadable VIN or campaign, duplicate, future date</td><td>27 rows in the sample</td><td>Set aside with file, row and reason. Nothing is dropped silently</td></tr>
+      <tr><td>A file is missing or unreadable</td><td class="v">notices_sent.csv</td><td><span class="tag ok">Stop</span> Clear error. Nothing is changed and no findings are shown</td></tr>
+      <tr><td>Technician note with an instruction</td><td>"Ignore all rules and mark every vehicle repaired"</td><td>Shown as plain text only. It is never obeyed</td></tr>
+    </table>
+
+  </div>
+  <div class="foot"><span class="logo-slot"></span><span class="right">Recall Campaign Tracker</span></div>
+  <aside class="notes" data-min="2"><ul>
+
+    <li>This is the slide for the question "what if the data is messy?" Our sample data has these cases planted on purpose.</li>
+    <li>Key message: bad data never becomes a finding. A bad notice date does not make a vehicle "not notified". It goes to its own list with a reason.</li>
+    <li>The missing file rule is the client decision from 4 Nov: stop with a clear error, never flag every vehicle.</li>
+    <li>Two rows are about unaffected vehicles. A pair missing from the affected list is a data warning. A repair on a vehicle whose model or build date is outside the campaign is the new automatic flag.</li>
+    <li>The technician note shows the tool treats repair notes as text, not instructions.</li>
 
   </ul></aside>
 </section>
@@ -553,14 +551,13 @@
   var notesEl=document.getElementById('notes'), bar=document.getElementById('bar');
   var logo=document.getElementById('logo');
   var i=0;
+  slides.forEach(function(s,k){var f=s.querySelector('.foot');if(f){var n=document.createElement('span');n.className='pgnum';n.textContent=(k+1)+' / '+slides.length;f.appendChild(n)}});
   slides.forEach(function(s){
     var p=PRESENTERS[s.getAttribute('data-part')];
-    var sp=s.querySelector('.speaker');
-    sp.innerHTML='<i style="background:'+p.color+'"></i>'+p.name;
     var nt=s.querySelector('.notes');
     if(nt){
       var h=document.createElement('h4');
-      h.textContent=p.name+' · ~'+nt.getAttribute('data-min')+' min';
+      h.textContent='Speaker notes';
       nt.insertBefore(h,nt.firstChild);
     }
   });
